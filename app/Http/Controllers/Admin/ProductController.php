@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\Admin\ProductService;
-use App\Http\Requests\Admin\StoreProductRequest;
-use App\Http\Requests\Admin\UpdateProductRequest;
+use App\Http\Requests\System\Product\StoreProductRequest;
+use App\Http\Requests\System\Store\UpdateProductRequest;
 
 class ProductController extends Controller
 {
@@ -24,6 +24,11 @@ class ProductController extends Controller
     public function store(StoreProductRequest $request)
     {
         return $this->productService->createProduct($request);
+    }
+
+    public function show($id)
+    {
+        return $this->productService->getProductById($id);
     }
 
     public function update(UpdateProductRequest $request, $id)

@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\Admin\StoreService;
-use App\Http\Requests\Admin\StoreStoreRequest;
-use App\Http\Requests\Admin\UpdateStoreRequest;
+use App\Http\Requests\System\Store\StoreRequest;
+use App\Http\Requests\System\Store\UpdateStoreRequest;
 
 class StoreController extends Controller
 {
@@ -21,9 +21,14 @@ class StoreController extends Controller
         return $this->storeService->getAllStores();
     }
 
-    public function store(StoreStoreRequest $request)
+    public function store(StoreRequest $request)
     {
         return $this->storeService->createStore($request);
+    }
+
+    public function show($id)
+    {
+        return $this->storeService->getStoreById($id);
     }
 
     public function update(UpdateStoreRequest $request, $id)
