@@ -1,19 +1,22 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-
+use App\Http\Controllers\API\AuthController;
 /*
 |--------------------------------------------------------------------------
 | Auth (User)
 |--------------------------------------------------------------------------
 */
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\API\ProfileController;
+use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::post('loginWithPassword', [AuthController::class, 'loginWithPassword']);
     Route::post('register', [AuthController::class, 'register']);
+});
+
+Route::middleware(['jwt.auth'])->prefix('auth')->group(function () {
+    Route::post('logout', [AuthController::class, 'logout']);
 });
 
 /*
@@ -34,8 +37,8 @@ Route::middleware(['jwt.auth'])->prefix('profile')->group(function () {
 use App\Http\Controllers\API\System\CartController as SystemCartController;
 use App\Http\Controllers\API\System\FavoriteController as SystemFavoriteController;
 use App\Http\Controllers\API\System\OrderController as SystemOrderController;
-use App\Http\Controllers\API\System\StoreController as SystemStoreController;
 use App\Http\Controllers\API\System\ProductController as SystemProductController;
+use App\Http\Controllers\API\System\StoreController as SystemStoreController;
 
 /**
  * Protected user actions
@@ -93,11 +96,13 @@ Route::prefix('products')->group(function () {
 | Admin Auth
 |--------------------------------------------------------------------------
 */
-use App\Http\Controllers\Api\Admin\AdminAuthController;
+use App\Http\Controllers\Admin\AdminAuthController;
 
 Route::prefix('admin/auth')->group(function () {
     Route::post('login', [AdminAuthController::class, 'login']);
     Route::post('register', [AdminAuthController::class, 'register']);
+    Route::post('logout', [AdminAuthController::class, 'logout'])->middleware('auth:admin');
+    Route::get('profile', [AdminAuthController::class, 'me'])->middleware('auth:admin');
 });
 
 /*
@@ -105,10 +110,10 @@ Route::prefix('admin/auth')->group(function () {
 | Admin Panel
 |--------------------------------------------------------------------------
 */
-use App\Http\Controllers\Admin\StoreController as AdminStoreController;
-use App\Http\Controllers\Admin\ProductController as AdminProductController;
-use App\Http\Controllers\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Admin\StoreController as AdminStoreController;
 
 Route::prefix('admin')
     ->middleware(['auth:admin'])

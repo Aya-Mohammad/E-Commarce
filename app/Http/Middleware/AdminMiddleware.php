@@ -18,7 +18,12 @@ class AdminMiddleware
     public function handle($request, Closure $next)
     {
         if (!Auth::guard('admin')->check()) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Unauthorized',
+                'errors' => [],
+            ], 401);
         }
 
         return $next($request);

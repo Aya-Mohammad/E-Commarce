@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Tymon\JWTAuth\Facades\JWTAuth;
-use Tymon\JWTAuth\Exceptions\JWTException;
 
 class JwtMiddleware
 {
@@ -21,8 +20,19 @@ class JwtMiddleware
     {
         try {
             $user = JWTAuth::parseToken()->authenticate();
-        } catch (\Exception $e) {
-            return response()->json(['error' => 'Unauthorized'], 401);
+
+            if (!$user) {
+                throw new \RuntimeException('Unauthorized');
+            }
+
+            $request->setUserResolver(static fn () => $user);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Unauthorized',
+                'errors' => [],
+            ], 401);
         }
 
         return $next($request);
