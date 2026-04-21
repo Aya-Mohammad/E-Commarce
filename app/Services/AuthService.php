@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Http\Resources\UserResource;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -23,7 +24,7 @@ class AuthService
 
         return [
             'token' => $token,
-            'user' => auth()->user()
+            'user' => new UserResource(auth()->user())
         ];
     }
 
@@ -43,8 +44,8 @@ class AuthService
 
             $url = null;
 
-            if (isset($data['image'])) {
-                $file = $data['image'];
+            if (isset($data['image_path'])) {
+                $file = $data['image_path'];
                 $fileName = Str::uuid() . '_' . $file->getClientOriginalName();
                 $file->move(public_path("uploads/users/{$data['phone']}"), $fileName);
                 $url = url("uploads/users/{$data['phone']}/$fileName");
@@ -58,9 +59,12 @@ class AuthService
 
             DB::commit();
 
+            // Refresh user to load the image relationship
+            $user->load('image');
+
             return [
                 'token' => $token,
-                'user' => $user,
+                'user' => new UserResource($user),
                 'image_path' => $url
             ];
 
@@ -70,8 +74,13 @@ class AuthService
         }
     }
 
-    public function logout($token)
+    public function logout(): bool
     {
-        JWTAuth::setToken($token)->invalidate();
+        try {
+            JWTAuth::parseToken()->invalidate();
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }

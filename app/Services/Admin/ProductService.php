@@ -3,16 +3,19 @@
 namespace App\Services\Admin;
 
 use App\Models\Product;
+use App\Traits\ApiResponseTrait;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class ProductService
 {
+    use ApiResponseTrait;
+
     public function getAllProducts()
     {
         $products = Product::with('image', 'store')->get();
 
-        return response()->json(['products' => $products]);
+        return $this->apiResponse(['products' => $products], 'Products fetched successfully');
     }
 
     public function createProduct($request)
@@ -22,14 +25,14 @@ class ProductService
         try {
             $product = Product::create([
                 'name' => $request->name,
-                'description' => $request->description,
+                'discraption' => $request->discraption,
                 'price' => $request->price,
                 'quantity' => $request->quantity,
                 'store_id' => $request->store_id,
             ]);
 
-            if ($request->hasFile('image')) {
-                foreach ($request->file('image') as $img) {
+            if ($request->hasFile('image_path')) {
+                foreach ($request->file('image_path') as $img) {
                     $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
                     $img->move(public_path('uploads/products'), $fileName);
 
@@ -41,18 +44,14 @@ class ProductService
 
             DB::commit();
 
-            return response()->json([
-                'message' => 'Product created',
+            return $this->apiResponse([
                 'product' => $product
-            ]);
+            ], 'Product created');
 
         } catch (\Exception $e) {
             DB::rollBack();
 
-            return response()->json([
-                'message' => 'Error creating product',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->apiResponse(null, 'Error creating product', 500, ['exception' => [$e->getMessage()]]);
         }
     }
 
@@ -65,14 +64,14 @@ class ProductService
         try {
             $product->update([
                 'name' => $request->name ?? $product->name,
-                'description' => $request->description ?? $product->description,
+                'discraption' => $request->discraption ?? $product->discraption,
                 'price' => $request->price ?? $product->price,
                 'quantity' => $request->quantity ?? $product->quantity,
                 'store_id' => $request->store_id ?? $product->store_id,
             ]);
 
-            if ($request->hasFile('image')) {
-                foreach ($request->file('image') as $img) {
+            if ($request->hasFile('image_path')) {
+                foreach ($request->file('image_path') as $img) {
                     $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
                     $img->move(public_path('uploads/products'), $fileName);
 
@@ -84,19 +83,22 @@ class ProductService
 
             DB::commit();
 
-            return response()->json([
-                'message' => 'Product updated',
+            return $this->apiResponse([
                 'product' => $product
-            ]);
+            ], 'Product updated');
 
         } catch (\Exception $e) {
             DB::rollBack();
 
-            return response()->json([
-                'message' => 'Error updating product',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->apiResponse(null, 'Error updating product', 500, ['exception' => [$e->getMessage()]]);
         }
+    }
+
+    public function getProductById($id)
+    {
+        $product = Product::with('image', 'store')->findOrFail($id);
+
+        return $this->apiResponse(['product' => $product], 'Product fetched successfully');
     }
 
     public function deleteProduct($id)
@@ -105,8 +107,6 @@ class ProductService
 
         $product->delete();
 
-        return response()->json([
-            'message' => 'Product deleted'
-        ]);
+        return $this->apiResponse(null, 'Product deleted');
     }
 }

@@ -6,9 +6,12 @@ use App\Models\User;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Store;
+use App\Traits\ApiResponseTrait;
 
 class DashboardService
 {
+    use ApiResponseTrait;
+
     public function getStats()
     {
         $totalUsers = User::count();
@@ -21,7 +24,7 @@ class DashboardService
         $rejectedOrders = Order::where('status', 'rejected')->count();
         $deliveredOrders = Order::where('status', 'delivered')->count();
 
-        return response()->json([
+        return $this->apiResponse([
             'users' => $totalUsers,
             'orders' => $totalOrders,
             'products' => $totalProducts,
@@ -33,6 +36,6 @@ class DashboardService
                 'rejected' => $rejectedOrders,
                 'delivered' => $deliveredOrders,
             ],
-        ]);
+        ], 'Dashboard stats fetched successfully');
     }
 }

@@ -5,20 +5,23 @@ namespace App\Services\Admin;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\OrderItem;
+use App\Traits\ApiResponseTrait;
 use Illuminate\Support\Facades\DB;
 
 class OrderService
 {
+    use ApiResponseTrait;
+
     public function handleOrder($orderId, $action)
     {
         $order = Order::find($orderId);
 
         if (!$order) {
-            return response()->json(['message' => 'Order not found'], 404);
+            return $this->apiResponse(null, 'Order not found', 404);
         }
 
         if ($order->status !== 'pending') {
-            return response()->json(['message' => 'Can\'t edit this order'], 400);
+            return $this->apiResponse(null, 'Can\'t edit this order', 400);
         }
 
         if ($action === 'approve') {
@@ -29,7 +32,7 @@ class OrderService
             return $this->rejectOrder($order);
         }
 
-        return response()->json(['message' => 'Wrong action'], 400);
+        return $this->apiResponse(null, 'Wrong action', 400);
     }
 
     private function approveOrder($order)
@@ -53,17 +56,13 @@ class OrderService
 
             DB::commit();
 
-            return response()->json([
-                'message' => 'Order approved',
+            return $this->apiResponse([
                 'order' => $order
-            ]);
+            ], 'Order approved');
         } catch (\Exception $e) {
             DB::rollBack();
 
-            return response()->json([
-                'message' => 'Failed to process order',
-                'error' => $e->getMessage(),
-            ], 500);
+            return $this->apiResponse(null, 'Failed to process order', 500, ['exception' => [$e->getMessage()]]);
         }
     }
 
@@ -88,17 +87,13 @@ class OrderService
 
             DB::commit();
 
-            return response()->json([
-                'message' => 'Order rejected',
+            return $this->apiResponse([
                 'order' => $order
-            ]);
+            ], 'Order rejected');
         } catch (\Exception $e) {
             DB::rollBack();
 
-            return response()->json([
-                'message' => 'Error while rejecting order',
-                'error' => $e->getMessage(),
-            ], 500);
+            return $this->apiResponse(null, 'Error while rejecting order', 500, ['exception' => [$e->getMessage()]]);
         }
     }
 
@@ -112,7 +107,7 @@ class OrderService
 
         $orders = $query->orderBy('created_at', 'desc')->get();
 
-        return response()->json(['orders' => $orders]);
+        return $this->apiResponse(['orders' => $orders], 'Orders fetched successfully');
     }
 
     public function getPendingOrders()
@@ -121,7 +116,7 @@ class OrderService
             ->where('status', 'pending')
             ->get();
 
-        return response()->json(['orders' => $orders]);
+        return $this->apiResponse(['orders' => $orders], 'Pending orders fetched successfully');
     }
 
     public function updateStatus($orderId, $status)
@@ -130,9 +125,8 @@ class OrderService
 
         $order->update(['status' => $status]);
 
-        return response()->json([
-            'message' => 'Status updated',
+        return $this->apiResponse([
             'order' => $order
-        ]);
+        ], 'Status updated');
     }
 }

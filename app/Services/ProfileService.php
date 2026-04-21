@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\User;
+use App\Http\Resources\UserResource;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -11,7 +12,7 @@ class ProfileService
 {
     public function getUser($user)
     {
-        return $user->load('image');
+        return new UserResource($user->load('image'));
     }
 
     public function updateProfile($request, $user)
@@ -49,7 +50,7 @@ class ProfileService
 
             DB::commit();
 
-            return $user->fresh('image');
+            return new UserResource($user->fresh('image'));
 
         } catch (\Throwable $e) {
             DB::rollBack();

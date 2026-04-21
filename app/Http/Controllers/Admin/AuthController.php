@@ -1,15 +1,17 @@
 <?php
 
-namespace App\Http\Controllers\Api\Admin;
+namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Services\Admin\AdminAuthService;
 use App\Http\Requests\Admin\Auth\LoginRequest;
 use App\Http\Requests\Admin\Auth\RegisterRequest;
-use Illuminate\Http\Request;
+use App\Services\Admin\AdminAuthService;
+use App\Traits\ApiResponseTrait;
 
 class AdminAuthController extends Controller
 {
+    use ApiResponseTrait;
+
     protected $service;
 
     public function __construct(AdminAuthService $service)
@@ -21,16 +23,15 @@ class AdminAuthController extends Controller
     {
         $result = $this->service->login($request->validated());
 
-        if (!$result) {
-            return response()->json(['message' => 'Invalid email or password'], 401);
+        if (! $result) {
+            return $this->apiResponse(null, 'Invalid email or password', 401);
         }
 
-        return response()->json([
-            'message' => 'Login successfully',
+        return $this->apiResponse([
             'access_token' => $result['token'],
             'token_type' => 'Bearer',
             'admin' => $result['admin'],
-        ]);
+        ], 'Login successfully');
     }
 
     public function register(RegisterRequest $request)
@@ -38,19 +39,15 @@ class AdminAuthController extends Controller
         try {
             $result = $this->service->register($request);
 
-            return response()->json([
-                'message' => 'Account created successfully',
+            return $this->apiResponse([
                 'access_token' => $result['token'],
                 'token_type' => 'Bearer',
                 'admin' => $result['admin'],
-                'image_path' => $result['image']
-            ], 201);
+                'image_path' => $result['image'],
+            ], 'Account created successfully', 201);
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Error creating account',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->apiResponse(null, 'Error creating account', 500, ['exception' => [$e->getMessage()]]);
         }
     }
 
@@ -58,20 +55,20 @@ class AdminAuthController extends Controller
     {
         $this->service->logout();
 
-        return response()->json(['message' => 'Logout']);
+        return $this->apiResponse(null, 'Logout');
     }
 
     public function me()
     {
         $admin = $this->service->getUser();
 
-        if (!$admin) {
-            return response()->json(['message' => 'Admin not found'], 404);
+        if (! $admin) {
+            return $this->apiResponse(null, 'Admin not found', 404);
         }
 
-        return response()->json([
+        return $this->apiResponse([
             'admin' => $admin,
-            'image_path' => $admin->image->image_path ?? null
-        ]);
+            'image_path' => $admin->image->image_path ?? null,
+        ], 'Admin fetched successfully');
     }
 }
