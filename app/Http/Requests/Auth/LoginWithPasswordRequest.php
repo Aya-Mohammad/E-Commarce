@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Ayth\Requests;
+namespace App\Http\Requests\Auth;
 
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -16,7 +16,7 @@ class LoginWithPasswordRequest extends FormRequest
         return [
             'phone' => 'required',
             'password' => 'required',
-            'fcm_token' => 'required'
+            'fcm_token' => 'nullable|string',
         ];
     }
 }
