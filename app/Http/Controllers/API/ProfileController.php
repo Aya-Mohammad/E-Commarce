@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\ProfileService;
 use App\Http\Requests\UpdateProfileRequest;
+use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 use JWTAuth;
 
 class ProfileController extends Controller
 {
+    use ApiResponseTrait;
+
     protected ProfileService $profileService;
 
     public function __construct(ProfileService $profileService)
@@ -23,19 +26,15 @@ class ProfileController extends Controller
             $user = JWTAuth::parseToken()->authenticate();
 
             if (!$user) {
-                return response()->json(['message' => 'User not found'], 404);
+                return $this->apiResponse(null, 'User not found', 404);
             }
 
             $data = $this->profileService->getUser($user);
 
-            return response()->json([
-                'user' => $data
-            ]);
+            return $this->apiResponse(['user' => $data], 'User fetched successfully');
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Token is invalid or expired'
-            ], 401);
+            return $this->apiResponse(null, 'Token is invalid or expired', 401);
         }
     }
 
@@ -45,9 +44,6 @@ class ProfileController extends Controller
 
         $updatedUser = $this->profileService->updateProfile($request, $user);
 
-        return response()->json([
-            'message' => 'Profile updated successfully',
-            'data' => $updatedUser
-        ]);
+        return $this->apiResponse($updatedUser, 'Profile updated successfully');
     }
 }

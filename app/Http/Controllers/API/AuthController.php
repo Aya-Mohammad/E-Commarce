@@ -1,10 +1,10 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers\API;
 
-use Illuminate\Http\Request;
-
+use App\Http\Controllers\Controller;
 use App\Services\AuthService;
+use App\Traits\ApiResponseTrait;
 use App\Traits\AuthResponseTrait;
 
 use App\Http\Requests\Auth\LoginRequest;
@@ -13,6 +13,7 @@ use App\Http\Requests\Auth\RegisterRequest;
 
 class AuthController extends Controller
 {
+    use ApiResponseTrait;
     use AuthResponseTrait;
 
     protected AuthService $authService;
@@ -26,34 +27,38 @@ class AuthController extends Controller
     {
         $status = $this->authService->login($request->phone);
 
-        return response()->json([ 'status' => $status ]);
+        return $this->apiResponse(['status' => $status], 'Login status fetched');
     }
 
     public function loginWithPassword(LoginWithPasswordRequest $request)
     {
         $result = $this->authService->loginWithPassword($request->validated());
 
-        if (!$result) { return response()->json([ 'message' => 'Invalid password' ], 401); }
+        if (!$result) { return $this->apiResponse(null, 'Invalid password', 401); }
 
-        return $this->createNewToken($result['token']);
+        return $this->createNewToken($result['token'], $result['user']);
     }
 
     public function register(RegisterRequest $request)
     {
         $data = $request->validated();
 
-        if ($request->hasFile('image_path')) { $data['image'] = $request->file('image_path'); }
+        if ($request->hasFile('image_path')) { $data['image_path'] = $request->file('image_path'); }
 
         $result = $this->authService->register($data);
 
-        return $this->createNewToken($result['token']);
+        return $this->createNewToken($result['token'], $result['user']);
     }
 
-    public function logout(Request $request)
+    public function logout()
     {
-        $this->authService->logout($request->bearerToken());
+        $loggedOut = $this->authService->logout();
 
-        return response()->json([ 'message' => 'Logged out successfully' ]);
+        if (!$loggedOut) {
+            return $this->apiResponse(null, 'Invalid or missing token', 401);
+        }
+
+        return $this->apiResponse(null, 'Logged out successfully');
     }
 
     public function refresh()

@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Store;
 use App\Models\Product;
+use App\Traits\ApiResponseTrait;
 
 class SearchController extends Controller
 {
+    use ApiResponseTrait;
+
     public function search(Request $request)
     {
         $request->validate([
@@ -25,9 +28,9 @@ class SearchController extends Controller
             ->where('name', 'like', "%{$query}%")
             ->get();
 
-        return response()->json([
+        return $this->apiResponse([
             'stores' => $stores,
             'products' => $products,
-        ]);
+        ], 'Search results fetched successfully');
     }
 }
