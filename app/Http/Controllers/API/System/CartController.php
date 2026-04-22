@@ -8,7 +8,7 @@ use App\Traits\ApiResponseTrait;
 use App\Services\System\CartService;
 use App\Http\Requests\System\Cart\AddToCartRequest;
 use App\Http\Requests\System\Cart\MoveFavoriteRequest;
-use Illuminate\Http\Request;
+use App\Http\Requests\System\Cart\UpdateCartQuantityRequest;
 
 class CartController extends Controller
 {
@@ -23,7 +23,7 @@ class CartController extends Controller
     */
     public function add(AddToCartRequest $request)
     {
-        return $this->apiResponse(
+        return $this->respond(
             $this->service->add($request->validated()),
             'Added',
             200
@@ -37,9 +37,19 @@ class CartController extends Controller
     */
     public function remove($id)
     {
-        return $this->apiResponse(
-            $this->service->remove($id),
-            'Removed',
+        return $this->respond($this->service->remove($id), 'Removed', 200);
+    }
+
+    /*
+    |----------------------------------------
+    | UPDATE CART QUANTITY
+    |----------------------------------------
+    */
+    public function updateQuantity(UpdateCartQuantityRequest $request, $id)
+    {
+        return $this->respond(
+            $this->service->updateQuantity($id, $request->quantity),
+            'Updated',
             200
         );
     }
@@ -65,10 +75,23 @@ class CartController extends Controller
     */
     public function moveFavorite(MoveFavoriteRequest $request, $favoriteId)
     {
-        return $this->apiResponse(
+        return $this->respond(
             $this->service->moveFavorite($request->validated(), $favoriteId),
             'Moved',
             200
         );
+    }
+
+    private function respond($result, string $message, int $status = 200)
+    {
+        if (is_array($result) && array_key_exists('error', $result)) {
+            return $this->apiResponse(
+                null,
+                $result['error'],
+                $result['status'] ?? 400
+            );
+        }
+
+        return $this->apiResponse($result, $message, $status);
     }
 }

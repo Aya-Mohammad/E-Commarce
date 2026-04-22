@@ -3,8 +3,8 @@
 namespace App\Services\System;
 
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Product;
-use App\Models\DeteilsOfOrder;
 use App\Models\Cart;
 use Illuminate\Support\Facades\DB;
 
@@ -12,146 +12,193 @@ class OrderService
 {
     public function getUserOrders()
     {
-        return Order::with('deteilsoforder')
+        return Order::with('items.product')
             ->where('user_id', auth()->id())
             ->orderBy('created_at', 'desc')
             ->get();
     }
 
-    public function placeOrder(array $data)
+    public function placeOrder()
     {
-        $user = auth()->user();
+        $userId = auth()->id();
 
-        $cartItems = Cart::where('user_id', $user->id)->get();
+        return DB::transaction(function () use ($userId) {
+            $cartItems = Cart::where('user_id', $userId)
+                ->with('product')
+                ->lockForUpdate()
+                ->get();
 
-        if ($cartItems->isEmpty()) {
-            return ['error' => 'السلة فارغة'];
-        }
+            if ($cartItems->isEmpty()) {
+                return $this->error('السلة فارغة');
+            }
 
-        return DB::transaction(function () use ($data, $user) {
+            $preparedItems = [];
+            $totalPrice = 0;
+
+            foreach ($cartItems as $cartItem) {
+                $product = Product::lockForUpdate()->find($cartItem->product_id);
+
+                if (!$product) {
+                    return $this->error('المنتج غير موجود', 404);
+                }
+
+                if ($product->quantity < $cartItem->quantity) {
+                    return $this->error("الكمية غير متوفرة للمنتج {$product->name}", 422);
+                }
+
+                $unitPrice = (float) $product->price;
+
+                $preparedItems[] = [
+                    'product' => $product,
+                    'product_id' => $product->id,
+                    'quantity' => $cartItem->quantity,
+                    'price' => $unitPrice,
+                ];
+
+                $totalPrice += $unitPrice * $cartItem->quantity;
+            }
 
             $order = Order::create([
-                'user_id' => $user->id,
-                'total_price' => $data['total_price'],
+                'user_id' => $userId,
+                'total_price' => $totalPrice,
                 'status' => 'pending',
             ]);
 
-            foreach ($data['items'] as $item) {
-
-                $orderItem = $order->items()->create([
+            foreach ($preparedItems as $item) {
+                $order->items()->create([
                     'product_id' => $item['product_id'],
                     'quantity' => $item['quantity'],
                     'price' => $item['price'],
                 ]);
 
-                $product = Product::find($orderItem->product_id);
-
-                if ($product && $product->quantity < $orderItem->quantity) {
-                    $product->quantity -= $orderItem->quantity;
-                    $product->save();
-                }
-
-                DeteilsOfOrder::create([
-                    'order_id' => $order->id,
-                    'product_id' => $item['product_id'],
-                    'quantity' => $item['quantity'],
-                ]);
+                $item['product']->quantity -= $item['quantity'];
+                $item['product']->save();
             }
 
-            Cart::where('user_id', $user->id)->delete();
+            Cart::where('user_id', $userId)->delete();
 
-            return $order;
+            return $order->load('items.product');
         });
     }
 
     public function cancelOrder($id)
     {
-        $order = Order::where('id', $id)
+        $order = Order::with('items')
+            ->where('id', $id)
             ->where('user_id', auth()->id())
             ->first();
 
         if (!$order) {
-            return ['error' => 'not found'];
+            return $this->error('not found', 404);
         }
 
         if ($order->status === 'cancelled') {
-            return ['error' => 'already cancelled'];
+            return $this->error('already cancelled');
+        }
+
+        if ($order->status !== 'pending') {
+            return $this->error('can not cancel this order');
         }
 
         return DB::transaction(function () use ($order) {
-
-            $details = DeteilsOfOrder::where('order_id', $order->id)->get();
-
-            foreach ($details as $detail) {
-                $product = Product::find($detail->product_id);
+            foreach ($order->items as $item) {
+                $product = Product::lockForUpdate()->find($item->product_id);
 
                 if ($product) {
-                    $product->quantity += $detail->quantity;
+                    $product->quantity += $item->quantity;
                     $product->save();
                 }
             }
 
-            $order->status = 'cancelled';
-            $order->save();
+            $order->update(['status' => 'cancelled']);
 
-            return $order;
+            return $order->fresh()->load('items.product');
         });
     }
 
-    public function manageOrder($orderId)
+    public function show($orderId)
     {
-        return Order::with('deteilsoforder.product')
-            ->find($orderId);
+        $order = Order::with('items.product')
+            ->where('id', $orderId)
+            ->where('user_id', auth()->id())
+            ->first();
+
+        if (!$order) {
+            return $this->error('not found', 404);
+        }
+
+        return $order;
     }
 
     public function updateProductQuantity($orderId, $productId, $quantity)
     {
-        $orderDetail = DeteilsOfOrder::where('order_id', $orderId)
-            ->where('product_id', $productId)
+        $order = Order::where('id', $orderId)
+            ->where('user_id', auth()->id())
             ->first();
 
-        if (!$orderDetail) return null;
+        if (!$order) {
+            return $this->error('not found', 404);
+        }
 
-        $product = Product::find($productId);
+        if ($order->status !== 'pending') {
+            return $this->error('can not edit this order');
+        }
 
-        $diff = $quantity - $orderDetail->quantity;
+        return DB::transaction(function () use ($order, $productId, $quantity) {
+            $orderItem = $order->items()
+                ->where('product_id', $productId)
+                ->first();
 
-        if ($diff > 0) {
-            if ($product->quantity < $diff) {
-                return ['error' => 'not enough stock'];
+            if (!$orderItem) {
+                return $this->error('not found', 404);
             }
 
-            $product->quantity -= $diff;
-        } else {
-            $product->quantity += abs($diff);
-        }
+            $product = Product::lockForUpdate()->find($productId);
 
-        $product->save();
+            if (!$product) {
+                return $this->error('product not found', 404);
+            }
 
-        $orderDetail->update([
-            'quantity' => $quantity
-        ]);
+            $diff = $quantity - $orderItem->quantity;
 
-        return $orderDetail;
+            if ($diff > 0) {
+                if ($product->quantity < $diff) {
+                    return $this->error('not enough stock', 422);
+                }
+
+                $product->quantity -= $diff;
+            } elseif ($diff < 0) {
+                $product->quantity += abs($diff);
+            }
+
+            $product->save();
+
+            $orderItem->update([
+                'quantity' => $quantity,
+            ]);
+
+            $this->recalculateOrderTotal($order);
+
+            return $order->fresh()->load('items.product');
+        });
     }
 
-    public function deleteProductFromOrder($orderId, $productId)
+    private function recalculateOrderTotal(Order $order): void
     {
-        $detail = DeteilsOfOrder::where('order_id', $orderId)
-            ->where('product_id', $productId)
-            ->first();
+        $totalPrice = $order->items()
+            ->get()
+            ->sum(fn (OrderItem $item) => $item->quantity * (float) $item->price);
 
-        if (!$detail) return null;
+        $order->update([
+            'total_price' => $totalPrice,
+        ]);
+    }
 
-        $product = Product::find($productId);
-
-        if ($product) {
-            $product->quantity += $detail->quantity;
-            $product->save();
-        }
-
-        $detail->delete();
-
-        return true;
+    private function error(string $message, int $status = 400): array
+    {
+        return [
+            'error' => $message,
+            'status' => $status,
+        ];
     }
 }

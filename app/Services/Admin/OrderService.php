@@ -3,8 +3,8 @@
 namespace App\Services\Admin;
 
 use App\Models\Order;
-use App\Models\Product;
 use App\Models\OrderItem;
+use App\Models\Product;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Support\Facades\DB;
 
@@ -12,16 +12,20 @@ class OrderService
 {
     use ApiResponseTrait;
 
-    public function handleOrder($orderId, $action)
+    public function handleOrder($orderId, $action = null)
     {
         $order = Order::find($orderId);
 
-        if (!$order) {
+        if (! $order) {
             return $this->apiResponse(null, 'Order not found', 404);
         }
 
         if ($order->status !== 'pending') {
             return $this->apiResponse(null, 'Can\'t edit this order', 400);
+        }
+
+        if ($action) {
+            $query->where('action', $action);
         }
 
         if ($action === 'approve') {
@@ -40,24 +44,13 @@ class OrderService
         DB::beginTransaction();
 
         try {
-            $orderItems = OrderItem::where('order_id', $order->id)->get();
-
-            foreach ($orderItems as $item) {
-                $product = Product::find($item->product_id);
-
-                if ($product) {
-                    $product->quantity -= $item->quantity;
-                    $product->save();
-                }
-            }
-
             $order->status = 'approved';
             $order->save();
 
             DB::commit();
 
             return $this->apiResponse([
-                'order' => $order
+                'order' => $order->load('items.product', 'user'),
             ], 'Order approved');
         } catch (\Exception $e) {
             DB::rollBack();
@@ -74,7 +67,7 @@ class OrderService
             $orderItems = OrderItem::where('order_id', $order->id)->get();
 
             foreach ($orderItems as $item) {
-                $product = Product::find($item->product_id);
+                $product = Product::lockForUpdate()->find($item->product_id);
 
                 if ($product) {
                     $product->quantity += $item->quantity;
@@ -88,7 +81,7 @@ class OrderService
             DB::commit();
 
             return $this->apiResponse([
-                'order' => $order
+                'order' => $order->load('items.product', 'user'),
             ], 'Order rejected');
         } catch (\Exception $e) {
             DB::rollBack();
@@ -99,7 +92,7 @@ class OrderService
 
     public function getAllOrders($status = null)
     {
-        $query = Order::with('items', 'user');
+        $query = Order::with('items.product', 'user');
 
         if ($status) {
             $query->where('status', $status);
@@ -108,25 +101,5 @@ class OrderService
         $orders = $query->orderBy('created_at', 'desc')->get();
 
         return $this->apiResponse(['orders' => $orders], 'Orders fetched successfully');
-    }
-
-    public function getPendingOrders()
-    {
-        $orders = Order::with('items', 'user')
-            ->where('status', 'pending')
-            ->get();
-
-        return $this->apiResponse(['orders' => $orders], 'Pending orders fetched successfully');
-    }
-
-    public function updateStatus($orderId, $status)
-    {
-        $order = Order::findOrFail($orderId);
-
-        $order->update(['status' => $status]);
-
-        return $this->apiResponse([
-            'order' => $order
-        ], 'Status updated');
     }
 }

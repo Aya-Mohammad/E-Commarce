@@ -3,13 +3,9 @@
 namespace App\Http\Controllers\API\System;
 
 use App\Http\Controllers\Controller;
-use App\Traits\ApiResponseTrait;
 use App\Services\System\OrderService;
-
-use App\Http\Requests\System\Order\StoreOrderRequest;
-use App\Http\Requests\System\Order\UpdateOrderRequest;
 use App\Http\Requests\System\Order\UpdateProductQuantityRequest;
-use Illuminate\Http\Request;
+use App\Traits\ApiResponseTrait;
 
 class OrderController extends Controller
 {
@@ -36,10 +32,10 @@ class OrderController extends Controller
     | PLACE ORDER
     |----------------------------------------
     */
-    public function store(StoreOrderRequest $request)
+    public function store()
     {
-        return $this->apiResponse(
-            $this->service->placeOrder($request->validated()),
+        return $this->respond(
+            $this->service->placeOrder(),
             'Order placed',
             201
         );
@@ -52,23 +48,17 @@ class OrderController extends Controller
     */
     public function cancel($id)
     {
-        return $this->apiResponse(
-            $this->service->cancelOrder($id),
-            'Cancelled'
-        );
+        return $this->respond($this->service->cancelOrder($id), 'Cancelled');
     }
 
     /*
     |----------------------------------------
-    | MANAGE ORDER
+    | SHOW ORDER
     |----------------------------------------
     */
-    public function manage($id)
+    public function show($id)
     {
-        return $this->apiResponse(
-            $this->service->manageOrder($id),
-            'OK'
-        );
+        return $this->respond($this->service->show($id), 'OK');
     }
 
     /*
@@ -76,28 +66,28 @@ class OrderController extends Controller
     | UPDATE PRODUCT QUANTITY
     |----------------------------------------
     */
-    public function updateProductQuantity(UpdateProductQuantityRequest $request, $orderId, $productId)
+    public function updateProductQuantity(UpdateProductQuantityRequest $request, $orderId)
     {
-        return $this->apiResponse(
+        return $this->respond(
             $this->service->updateProductQuantity(
                 $orderId,
-                $productId,
+                $request->product_id,
                 $request->quantity
             ),
             'Updated'
         );
     }
 
-    /*
-    |----------------------------------------
-    | DELETE PRODUCT FROM ORDER
-    |----------------------------------------
-    */
-    public function deleteProduct($orderId, $productId)
+    private function respond($result, string $message, int $status = 200)
     {
-        return $this->apiResponse(
-            $this->service->deleteProductFromOrder($orderId, $productId),
-            'Deleted'
-        );
+        if (is_array($result) && array_key_exists('error', $result)) {
+            return $this->apiResponse(
+                null,
+                $result['error'],
+                $result['status'] ?? 400
+            );
+        }
+
+        return $this->apiResponse($result, $message, $status);
     }
 }

@@ -3,10 +3,8 @@
 namespace App\Http\Controllers\API\System;
 
 use App\Http\Controllers\Controller;
-use App\Traits\ApiResponseTrait;
-
 use App\Services\System\StoreService;
-use App\Http\Requests\System\Store\StoreRequest;
+use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 
 class StoreController extends Controller
@@ -20,10 +18,10 @@ class StoreController extends Controller
     | GET ALL STORES
     |----------------------------------------
     */
-    public function index(Request $request)
+    public function index()
     {
         return $this->apiResponse(
-            $this->service->getAll(),
+            $this->service->index(),
             'Stores retrieved',
             200
         );
@@ -37,23 +35,9 @@ class StoreController extends Controller
     public function show($id)
     {
         return $this->apiResponse(
-            $this->service->get($id),
+            $this->service->show($id),
             'OK',
             200
-        );
-    }
-
-    /*
-    |----------------------------------------
-    | CREATE STORE
-    |----------------------------------------
-    */
-    public function store(StoreRequest $request)
-    {
-        return $this->apiResponse(
-            $this->service->create($request),
-            'Store created',
-            201
         );
     }
 }
