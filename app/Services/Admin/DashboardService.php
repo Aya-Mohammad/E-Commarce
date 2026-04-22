@@ -23,7 +23,7 @@ class DashboardService
         $approvedOrders = Order::where('status', 'approved')->count();
         $rejectedOrders = Order::where('status', 'rejected')->count();
         $deliveredOrders = Order::where('status', 'delivered')->count();
-
+        $canceledOrders = Order::where('status', 'cancelled')->count();
         return $this->apiResponse([
             'users' => $totalUsers,
             'orders' => $totalOrders,
@@ -35,6 +35,7 @@ class DashboardService
                 'approved' => $approvedOrders,
                 'rejected' => $rejectedOrders,
                 'delivered' => $deliveredOrders,
+                'cancelled' => $canceledOrders,
             ],
         ], 'Dashboard stats fetched successfully');
     }
