@@ -52,8 +52,9 @@ Route::middleware(['jwt.auth'])->group(function () {
     */
     Route::prefix('cart')->group(function () {
         Route::post('add', [SystemCartController::class, 'add']);
+        Route::post('update-quantity/{id}', [SystemCartController::class, 'updateQuantity']);
         Route::delete('remove/{id}', [SystemCartController::class, 'remove']);
-        Route::get('view', [SystemCartController::class, 'view']);
+        Route::get('view', [SystemCartController::class, 'show']);
     });
 
     /*
@@ -63,9 +64,9 @@ Route::middleware(['jwt.auth'])->group(function () {
     */
     Route::prefix('favorites')->group(function () {
         Route::get('/', [SystemFavoriteController::class, 'index']);
-        Route::post('add', [SystemFavoriteController::class, 'add']);
-        Route::delete('remove/{id}', [SystemFavoriteController::class, 'remove']);
-        Route::get('is-favorited/{productId}', [SystemFavoriteController::class, 'isFavorited']);
+        Route::post('add', [SystemFavoriteController::class, 'store']);
+        Route::delete('remove/{id}', [SystemFavoriteController::class, 'destroy']);
+        Route::get('check-favorite/{productId}', [SystemFavoriteController::class, 'check']);
     });
 
     /*
@@ -73,7 +74,13 @@ Route::middleware(['jwt.auth'])->group(function () {
     | Orders (User)
     |-------------------------
     */
-    Route::apiResource('orders', SystemOrderController::class);
+    Route::prefix('orders')->group(function () {
+        Route::get('/', [SystemOrderController::class, 'index']);
+        Route::post('place', [SystemOrderController::class, 'store']);
+        Route::get('{id}', [SystemOrderController::class, 'show']);
+        Route::post('cancel/{id}', [SystemOrderController::class, 'cancel']);
+        Route::post('update-product-quantity/{orderId}', [SystemOrderController::class, 'updateProductQuantity']);
+    });
 });
 
 /*
@@ -81,15 +88,8 @@ Route::middleware(['jwt.auth'])->group(function () {
 | Public System Data (Read-only)
 |--------------------------------------------------------------------------
 */
-Route::prefix('stores')->group(function () {
-    Route::get('/', [SystemStoreController::class, 'index']);
-    Route::get('{id}', [SystemStoreController::class, 'show']);
-});
-
-Route::prefix('products')->group(function () {
-    Route::get('/', [SystemProductController::class, 'index']);
-    Route::get('{id}', [SystemProductController::class, 'show']);
-});
+Route::apiResource('stores', SystemStoreController::class)->only(['index', 'show']);
+Route::apiResource('products', SystemProductController::class)->only(['index', 'show']);
 
 /*
 |--------------------------------------------------------------------------
@@ -123,7 +123,10 @@ Route::prefix('admin')
 
         Route::apiResource('stores', AdminStoreController::class);
         Route::apiResource('products', AdminProductController::class);
-        Route::apiResource('orders', AdminOrderController::class);
+        Route::prefix('orders')->group(function () {
+            Route::get('/', [AdminOrderController::class, 'getAllOrders']);
+            Route::get('{id}', [AdminOrderController::class, 'show']);
+        });
     });
 
 /*
