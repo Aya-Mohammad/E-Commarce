@@ -11,14 +11,14 @@ use JWTAuth;
 
 class AuthService
 {
-    public function login($phone)
+    public function checkUser($phone)
     {
         $user = User::where('phone', $phone)->first();
 
         return $user ? 'existing_user' : 'new_user';
     }
 
-    public function loginWithPassword($credentials)
+    public function login($credentials)
     {
         if (!$token = JWTAuth::attempt($credentials)) { return null; }
 

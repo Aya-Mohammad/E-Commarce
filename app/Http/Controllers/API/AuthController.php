@@ -3,18 +3,16 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\CheckUserRequest;
+use App\Http\Requests\Auth\LoginRequest;
+use App\Http\Requests\Auth\RegisterRequest;
 use App\Services\AuthService;
 use App\Traits\ApiResponseTrait;
 use App\Traits\AuthResponseTrait;
 
-use App\Http\Requests\Auth\LoginRequest;
-use App\Http\Requests\Auth\LoginWithPasswordRequest;
-use App\Http\Requests\Auth\RegisterRequest;
-
 class AuthController extends Controller
 {
-    use ApiResponseTrait;
-    use AuthResponseTrait;
+    use ApiResponseTrait, AuthResponseTrait;
 
     protected AuthService $authService;
 
@@ -23,18 +21,20 @@ class AuthController extends Controller
         $this->authService = $authService;
     }
 
-    public function login(LoginRequest $request)
+    public function checkUser(CheckUserRequest $request)
     {
-        $status = $this->authService->login($request->phone);
+        $status = $this->authService->checkUser($request->phone);
 
-        return $this->apiResponse(['status' => $status], 'Login status fetched');
+        return $this->apiResponse(['status' => $status], 'User status fetched');
     }
 
-    public function loginWithPassword(LoginWithPasswordRequest $request)
+    public function login(LoginRequest $request)
     {
-        $result = $this->authService->loginWithPassword($request->validated());
+        $result = $this->authService->login($request->validated());
 
-        if (!$result) { return $this->apiResponse(null, 'Invalid password', 401); }
+        if (! $result) {
+            return $this->apiResponse(null, 'Invalid password', 401);
+        }
 
         return $this->createNewToken($result['token'], $result['user']);
     }
@@ -43,7 +43,9 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        if ($request->hasFile('image_path')) { $data['image_path'] = $request->file('image_path'); }
+        if ($request->hasFile('image_path')) {
+            $data['image_path'] = $request->file('image_path');
+        }
 
         $result = $this->authService->register($data);
 
@@ -54,7 +56,7 @@ class AuthController extends Controller
     {
         $loggedOut = $this->authService->logout();
 
-        if (!$loggedOut) {
+        if (! $loggedOut) {
             return $this->apiResponse(null, 'Invalid or missing token', 401);
         }
 
