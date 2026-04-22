@@ -10,7 +10,7 @@ class UpdateProductRequest extends FormRequest
     {
         return [
             'name' => 'sometimes|required|string|unique:products,name,' . $this->route('id'),
-            'discraption' => 'sometimes|required|string',
+            'description' => 'sometimes|required|string',
             'price' => 'sometimes|required|numeric',
             'quantity' => 'sometimes|required|integer',
             'store_id' => 'sometimes|required|exists:stores,id',

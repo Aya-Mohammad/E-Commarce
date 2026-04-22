@@ -10,7 +10,7 @@ class StoreProductRequest extends FormRequest
     {
         return [
             'name' => 'required|string',
-            'discraption' => 'required|string',
+            'description' => 'required|string',
             'price' => 'required',
             'quantity' => 'required|string',
             'store_id' => 'required',

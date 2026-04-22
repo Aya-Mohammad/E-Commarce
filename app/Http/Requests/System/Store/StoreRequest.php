@@ -10,7 +10,7 @@ class StoreRequest extends FormRequest
     {
         return [
             'name' => 'required|string|unique:stores,name',
-            'discraption' => 'required|string',
+            'description' => 'required|string',
             'delivery_cost' => 'required',
             'distance' => 'required',
             'start_of_work' => 'required|string',

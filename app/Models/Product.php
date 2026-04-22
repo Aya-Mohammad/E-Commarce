@@ -10,7 +10,7 @@ use App\Models\FavouriteOfProduct;
 use App\Services\FCMService;
 class Product extends Model
 {
-    protected $fillable = ['name', 'discraption', 'price', 'quantity', 'store_id'];
+    protected $fillable = ['name', 'description', 'price', 'quantity', 'store_id'];
 
     public function image()
     {
@@ -47,5 +47,5 @@ class Product extends Model
     {
         return $this->belongsToMany(Order::class)->withPivot('quantity');
     }
-    
+
 }

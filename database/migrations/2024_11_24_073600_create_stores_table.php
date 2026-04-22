@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('stores', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->string('discraption');
+            $table->string('description');
             $table->float('delivery_cost');
             $table->string('distance');
             $table->string('start_of_work');

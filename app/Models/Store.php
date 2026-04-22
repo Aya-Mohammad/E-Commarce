@@ -7,7 +7,7 @@ use App\Services\FCMService;
 
 class Store extends Model
 {
-    protected $fillable = ['name', 'discraption', 'delivery_cost', 'distance', 'start_of_work', 'end_of_work'];
+    protected $fillable = ['name', 'description', 'delivery_cost', 'distance', 'start_of_work', 'end_of_work'];
     public function image()
     {
         return $this->morphMany(Picture::class, 'imageable');

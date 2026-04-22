@@ -25,7 +25,7 @@ class StoreService
         try {
             $store = Store::create([
                 'name' => $request->name,
-                'discraption' => $request->discraption,
+                'description' => $request->description,
                 'delivery_cost' => $request->delivery_cost,
                 'distance' => $request->distance,
                 'start_of_work' => $request->start_of_work,
@@ -59,21 +59,18 @@ class StoreService
     public function updateStore($id, $request)
     {
         $store = Store::findOrFail($id);
+        $validatedData = $request->validated();
 
         DB::beginTransaction();
 
         try {
-            $store->update([
-                'name' => $request->name ?? $store->name,
-                'discraption' => $request->discraption ?? $store->discraption,
-                'delivery_cost' => $request->delivery_cost ?? $store->delivery_cost,
-                'distance' => $request->distance ?? $store->distance,
-                'start_of_work' => $request->start_of_work ?? $store->start_of_work,
-                'end_of_work' => $request->end_of_work ?? $store->end_of_work,
-            ]);
+            $store->update($validatedData);
 
             if ($request->hasFile('image_path')) {
-                foreach ($request->file('image_path') as $img) {
+                $images = $request->file('image_path');
+                $images = is_array($images) ? $images : [$images];
+
+                foreach ($images as $img) {
                     $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
                     $img->move(public_path('uploads/stores'), $fileName);
 
@@ -84,6 +81,9 @@ class StoreService
             }
 
             DB::commit();
+
+            // Reload the model from database to get fresh data
+            $store = Store::with('image')->findOrFail($id);
 
             return $this->apiResponse([
                 'store' => $store

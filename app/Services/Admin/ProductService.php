@@ -25,7 +25,7 @@ class ProductService
         try {
             $product = Product::create([
                 'name' => $request->name,
-                'discraption' => $request->discraption,
+                'description' => $request->description,
                 'price' => $request->price,
                 'quantity' => $request->quantity,
                 'store_id' => $request->store_id,
@@ -64,7 +64,7 @@ class ProductService
         try {
             $product->update([
                 'name' => $request->name ?? $product->name,
-                'discraption' => $request->discraption ?? $product->discraption,
+                'description' => $request->description ?? $product->description,
                 'price' => $request->price ?? $product->price,
                 'quantity' => $request->quantity ?? $product->quantity,
                 'store_id' => $request->store_id ?? $product->store_id,
