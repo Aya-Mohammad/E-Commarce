@@ -3,10 +3,8 @@
 namespace App\Http\Controllers\API\System;
 
 use App\Http\Controllers\Controller;
-use App\Traits\ApiResponseTrait;
-
 use App\Services\System\ProductService;
-use App\Http\Requests\System\Product\StoreProductRequest;
+use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 
 class ProductController extends Controller
@@ -23,7 +21,7 @@ class ProductController extends Controller
     public function index(Request $request)
     {
         return $this->apiResponse(
-            $this->service->getAll(),
+            $this->service->index(),
             'Products retrieved',
             200
         );
@@ -37,23 +35,9 @@ class ProductController extends Controller
     public function show($id)
     {
         return $this->apiResponse(
-            $this->service->get($id),
+            $this->service->show($id),
             'OK',
             200
-        );
-    }
-
-    /*
-    |----------------------------------------
-    | ADD PRODUCT
-    |----------------------------------------
-    */
-    public function store(StoreProductRequest $request)
-    {
-        return $this->apiResponse(
-            $this->service->create($request),
-            'Product created',
-            201
         );
     }
 }
