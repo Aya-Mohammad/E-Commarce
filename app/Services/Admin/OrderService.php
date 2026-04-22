@@ -12,7 +12,7 @@ class OrderService
 {
     use ApiResponseTrait;
 
-    public function handleOrder($orderId, $action = null)
+    public function handleOrder($orderId)
     {
         $order = Order::find($orderId);
 
@@ -24,9 +24,7 @@ class OrderService
             return $this->apiResponse(null, 'Can\'t edit this order', 400);
         }
 
-        if ($action) {
-            $query->where('action', $action);
-        }
+        $action = request()->input('action');
 
         if ($action === 'approve') {
             return $this->approveOrder($order);
@@ -101,5 +99,16 @@ class OrderService
         $orders = $query->orderBy('created_at', 'desc')->get();
 
         return $this->apiResponse(['orders' => $orders], 'Orders fetched successfully');
+    }
+
+    public function getOrderById($id)
+    {
+        $order = Order::with('items.product', 'user')->find($id);
+
+        if (! $order) {
+            return $this->apiResponse(null, 'Order not found', 404);
+        }
+
+        return $this->apiResponse(['order' => $order], 'Order fetched successfully');
     }
 }

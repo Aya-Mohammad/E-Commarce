@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\Admin\OrderService;
-use App\Http\Requests\Admin\UpdateOrderStatusRequest;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
@@ -26,4 +25,8 @@ class OrderController extends Controller
         return $this->orderService->getAllOrders($request->status);
     }
 
+    public function show($id)
+    {
+        return $this->orderService->getOrderById($id);
+    }
 }

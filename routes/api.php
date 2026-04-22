@@ -126,6 +126,7 @@ Route::prefix('admin')
         Route::prefix('orders')->group(function () {
             Route::get('/', [AdminOrderController::class, 'getAllOrders']);
             Route::get('{id}', [AdminOrderController::class, 'show']);
+            Route::post('handle/{orderId}', [AdminOrderController::class, 'handleOrder']);
         });
     });
 
