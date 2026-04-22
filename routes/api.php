@@ -10,8 +10,8 @@ use App\Http\Controllers\API\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
+    Route::post('check-user', [AuthController::class, 'checkUser']);
     Route::post('login', [AuthController::class, 'login']);
-    Route::post('loginWithPassword', [AuthController::class, 'loginWithPassword']);
     Route::post('register', [AuthController::class, 'register']);
 });
 

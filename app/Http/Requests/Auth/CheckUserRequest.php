@@ -4,7 +4,7 @@ namespace App\Http\Requests\Auth;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class LoginWithPasswordRequest extends FormRequest
+class CheckUserRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,9 +14,7 @@ class LoginWithPasswordRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'phone' => 'required',
-            'password' => 'required',
-            'fcm_token' => 'nullable|string',
+            'phone' => 'required|digits:9',
         ];
     }
 }
