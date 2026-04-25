@@ -33,6 +33,7 @@ class StoreController extends Controller
 
     public function update(UpdateStoreRequest $request, $id)
     {
+        
         return $this->storeService->updateStore($id, $request);
     }
 

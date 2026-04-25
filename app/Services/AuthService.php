@@ -77,10 +77,12 @@ class AuthService
     public function logout(): bool
     {
         try {
-            JWTAuth::parseToken()->invalidate();
+            JWTAuth::parseToken()->invalidate(true);
+            
             return true;
         } catch (\Throwable $e) {
             return false;
         }
     }
 }
+

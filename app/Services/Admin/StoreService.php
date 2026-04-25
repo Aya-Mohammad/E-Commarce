@@ -33,15 +33,19 @@ class StoreService
             ]);
 
             if ($request->hasFile('image_path')) {
-                foreach ($request->file('image_path') as $img) {
-                    $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
-                    $img->move(public_path('uploads/stores'), $fileName);
 
-                    $store->image()->create([
-                        'image_path' => url("uploads/stores/$fileName"),
-                    ]);
-                }
-            }
+    $images = $request->file('image_path');
+    $images = is_array($images) ? $images : [$images];
+
+    foreach ($images as $img) {
+        $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
+        $img->move(public_path('uploads/stores'), $fileName);
+
+        $store->image()->create([
+            'image_path' => url("uploads/stores/$fileName"),
+        ]);
+    }
+}
 
             DB::commit();
 
@@ -60,7 +64,6 @@ class StoreService
     {
         $store = Store::findOrFail($id);
         $validatedData = $request->validated();
-
         DB::beginTransaction();
 
         try {
