@@ -6,15 +6,21 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateProductRequest extends FormRequest
 {
-    public function rules()
+    public function authorize(): bool
+    {
+        return auth('admin')->check();
+    }
+
+    public function rules(): array
     {
         return [
-            'name' => 'sometimes|string',
-            'description' => 'sometimes|string',
-            'price' => 'sometimes|numeric',
-            'quantity' => 'sometimes|integer',
-            'store_id' => 'sometimes|exists:stores,id',
-            'image.*' => 'nullable|image|mimes:jpg,jpeg,png',
+            'name'        => 'sometimes|required|string|max:255',
+            'description' => 'sometimes|required|string|max:2000',
+            'price'       => 'sometimes|required|numeric|min:0',
+            'quantity'    => 'sometimes|required|integer|min:0',
+            'store_id'    => 'sometimes|required|integer|exists:stores,id',
+            'images'      => 'nullable|array',
+            'images.*'    => 'image|mimes:jpg,jpeg,png|max:2048',
         ];
     }
 }

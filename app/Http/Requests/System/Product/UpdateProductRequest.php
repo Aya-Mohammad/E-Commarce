@@ -6,15 +6,22 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateProductRequest extends FormRequest
 {
+    public function authorize(): bool
+    {
+        return auth()->check();
+    }
+
     public function rules(): array
     {
+        $productId = $this->route('id') ?? $this->route('product');
+
         return [
-            'name' => 'sometimes|required|string|unique:products,name,' . $this->route('id'),
-            'description' => 'sometimes|required|string',
-            'price' => 'sometimes|required|numeric',
-            'quantity' => 'sometimes|required|integer',
-            'store_id' => 'sometimes|required|exists:stores,id',
-            'image_path' => 'nullable|mimes:jpeg,png,jpg,gif',
+            'name'        => 'sometimes|required|string|max:255|unique:products,name,' . $productId,
+            'description' => 'sometimes|required|string|max:2000',
+            'price'       => 'sometimes|required|numeric|min:0',
+            'quantity'    => 'sometimes|required|integer|min:0',
+            'store_id'    => 'sometimes|required|integer|exists:stores,id',
+            'image_path'  => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
         ];
     }
 }

@@ -3,110 +3,129 @@
 namespace App\Services\Admin;
 
 use App\Models\Product;
-use App\Traits\ApiResponseTrait;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class ProductService
 {
-    use ApiResponseTrait;
-
-    public function getAllProducts()
+    # Add (Caching (Redis) - product list rarely changes, high read frequency)
+    # Add (Cache Invalidation - when product is created/updated/deleted)
+    # Pagination already exists 
+    public function getAllProducts(int $perPage = 15)
     {
-        $products = Product::with('image', 'store')->get();
-
-        return $this->apiResponse(['products' => $products], 'Products fetched successfully');
+        return Product::with('image', 'store')->paginate($perPage);
     }
 
-    public function createProduct($request)
+    # Add (Async Queue - image processing should be done in background Job)
+    # Add (Cache Invalidation - invalidate product list cache after creation)
+    # Risk: images are stored one by one inside Transaction - if storage fails
+    # mid-loop, DB rolls back but already-stored files remain on disk (orphan files)
+    # Fix: store images AFTER DB commit, not inside Transaction
+    # Risk: no max limit on number of images per product (Capacity Control missing)
+    public function createProduct(array $data, array $images = []): Product
     {
         DB::beginTransaction();
 
         try {
             $product = Product::create([
-                'name' => $request->name,
-                'description' => $request->description,
-                'price' => $request->price,
-                'quantity' => $request->quantity,
-                'store_id' => $request->store_id,
+                'name'        => $data['name'],
+                'description' => $data['description'],
+                'price'       => $data['price'],
+                'quantity'    => $data['quantity'],
+                'store_id'    => $data['store_id'],
             ]);
 
-            if ($request->hasFile('image_path')) {
-                foreach ($request->file('image_path') as $img) {
-                    $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
-                    $img->move(public_path('uploads/products'), $fileName);
-
-                    $product->image()->create([
-                        'image_path' => url("uploads/products/$fileName"),
-                    ]);
+            foreach ($images as $img) {
+                $realMimeType = $img->getMimeType();
+                if (!in_array($realMimeType, ['image/jpeg', 'image/png'])) {
+                    continue;
                 }
+
+                $extension = strtolower($img->getClientOriginalExtension());
+                $fileName  = Str::uuid() . '.' . $extension;
+
+                $path = $img->storeAs('uploads/products', $fileName, 'private');
+
+                $product->image()->create(['image_path' => $path]);
             }
 
             DB::commit();
 
-            return $this->apiResponse([
-                'product' => $product
-            ], 'Product created');
+            return $product->load('image', 'store');
 
         } catch (\Exception $e) {
             DB::rollBack();
-
-            return $this->apiResponse(null, 'Error creating product', 500, ['exception' => [$e->getMessage()]]);
+            Log::error('Error creating product: ' . $e->getMessage());
+            throw $e;
         }
     }
 
-    public function updateProduct($id, $request)
+    # Add (Async Queue - image processing should be done in background Job)
+    # Add (Cache Invalidation - invalidate product cache after update)
+    # Risk: same orphan files problem - storage inside Transaction
+    # Risk: old images are NOT deleted when new ones are uploaded (storage leak)
+    # Fix: delete old images from disk before storing new ones
+    # Risk: no max limit on number of images (Capacity Control missing)
+    public function updateProduct(int $id, array $data, array $images = []): Product
     {
         $product = Product::findOrFail($id);
 
         DB::beginTransaction();
 
         try {
-            $product->update([
-                'name' => $request->name ?? $product->name,
-                'description' => $request->description ?? $product->description,
-                'price' => $request->price ?? $product->price,
-                'quantity' => $request->quantity ?? $product->quantity,
-                'store_id' => $request->store_id ?? $product->store_id,
-            ]);
+            $product->update(array_filter(
+                array_intersect_key($data, array_flip([
+                    'name', 'description', 'price', 'quantity', 'store_id'
+                ])),
+                fn($value) => !is_null($value)
+            ));
 
-            if ($request->hasFile('image_path')) {
-                foreach ($request->file('image_path') as $img) {
-                    $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
-                    $img->move(public_path('uploads/products'), $fileName);
-
-                    $product->image()->create([
-                        'image_path' => url("uploads/products/$fileName"),
-                    ]);
+            foreach ($images as $img) {
+                $realMimeType = $img->getMimeType();
+                if (!in_array($realMimeType, ['image/jpeg', 'image/png'])) {
+                    continue;
                 }
+
+                $extension = strtolower($img->getClientOriginalExtension());
+                $fileName  = Str::uuid() . '.' . $extension;
+                $path      = $img->storeAs('uploads/products', $fileName, 'private');
+
+                $product->image()->create(['image_path' => $path]);
             }
 
             DB::commit();
 
-            return $this->apiResponse([
-                'product' => $product
-            ], 'Product updated');
+            return $product->fresh('image', 'store');
 
         } catch (\Exception $e) {
             DB::rollBack();
-
-            return $this->apiResponse(null, 'Error updating product', 500, ['exception' => [$e->getMessage()]]);
+            Log::error('Error updating product: ' . $e->getMessage());
+            throw $e;
         }
     }
 
-    public function getProductById($id)
+    # Add (Caching (Redis) - single product data, very high read frequency)
+    # Add (Cache Invalidation - when product is updated or deleted)
+    public function getProductById(int $id): Product
     {
-        $product = Product::with('image', 'store')->findOrFail($id);
-
-        return $this->apiResponse(['product' => $product], 'Product fetched successfully');
+        return Product::with('image', 'store')->findOrFail($id);
     }
 
-    public function deleteProduct($id)
+    # Add (Cache Invalidation - invalidate product cache and product list cache)
+    # Add (Async Queue - image deletion from disk should be done in background Job)
+    # Risk: if Storage::delete() fails, product is already deleted from DB
+    # Fix: wrap in Transaction and handle storage failure gracefully
+    # Risk: no check if product has active pending orders before deletion
+    public function deleteProduct(int $id): void
     {
-        $product = Product::findOrFail($id);
+        $product = Product::with('image')->findOrFail($id);
+
+        foreach ($product->image as $image) {
+            Storage::disk('private')->delete($image->image_path);
+        }
 
         $product->delete();
-
-        return $this->apiResponse(null, 'Product deleted');
     }
 }

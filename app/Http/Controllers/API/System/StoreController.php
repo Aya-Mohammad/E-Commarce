@@ -13,31 +13,25 @@ class StoreController extends Controller
 
     public function __construct(private StoreService $service) {}
 
-    /*
-    |----------------------------------------
-    | GET ALL STORES
-    |----------------------------------------
-    */
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = min((int) $request->get('per_page', 15), 100);
+
         return $this->apiResponse(
-            $this->service->index(),
-            'Stores retrieved',
+            $this->service->index($perPage),
+            'Stores retrieved successfully',
             200
         );
     }
 
-    /*
-    |----------------------------------------
-    | GET SINGLE STORE
-    |----------------------------------------
-    */
     public function show($id)
     {
-        return $this->apiResponse(
-            $this->service->show($id),
-            'OK',
-            200
-        );
+        $store = $this->service->show($id);
+
+        if (!$store) {
+            return $this->apiResponse(null, 'Store not found', 404);
+        }
+
+        return $this->apiResponse($store, 'Store retrieved successfully', 200);
     }
 }

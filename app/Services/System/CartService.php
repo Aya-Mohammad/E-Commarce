@@ -8,29 +8,43 @@ use Illuminate\Support\Facades\DB;
 
 class CartService
 {
+    # we have (Race Condition) - we use (Transaction + Pessimistic Locking)
+    # Better use (Optimistic Locking)
+    # Add (Cache Invalidation for product quantity)
+    # Add (Capacity Control - max quantity per product per user)
     public function add(array $data)
     {
-        $product = Product::find($data['product_id']);
+        return DB::transaction(function () use ($data) {
+            $product = Product::lockForUpdate()->find($data['product_id']);
 
-        if (!$product) {
-            return ['error' => 'product not found', 'status' => 404];
-        }
+            if (!$product) {
+                return ['error' => 'Product not found', 'status' => 404];
+            }
 
-        if ($product->quantity < $data['quantity']) {
-            return ['error' => 'الكمية غير متوفرة', 'status' => 422];
-        }
+            $existingCart = Cart::where('user_id', auth()->id())
+                ->where('product_id', $data['product_id'])
+                ->first();
 
-        return Cart::updateOrCreate(
-            [
-                'user_id' => auth()->id(),
-                'product_id' => $data['product_id'],
-            ],
-            [
-                'quantity' => $data['quantity'],
-            ]
-        );
+            $targetQuantity = ($existingCart?->quantity ?? 0) + $data['quantity'];
+
+            if ($product->quantity < $targetQuantity) {
+                return ['error' => 'Not enough stock', 'status' => 422];
+            }
+
+            return Cart::updateOrCreate(
+                [
+                    'user_id'    => auth()->id(),
+                    'product_id' => $data['product_id'],
+                ],
+                [
+                    'quantity' => $targetQuantity,
+                ]
+            );
+        });
     }
 
+    # No Transaction - safe here (single delete, no stock changes)
+    # Add (Cache Invalidation for cart) 
     public function remove($id)
     {
         $cart = Cart::where('id', $id)
@@ -38,7 +52,7 @@ class CartService
             ->first();
 
         if (!$cart) {
-            return ['error' => 'not found', 'status' => 404];
+            return ['error' => 'Cart item not found', 'status' => 404];
         }
 
         $cart->delete();
@@ -46,33 +60,39 @@ class CartService
         return true;
     }
 
+    # we have (Race Condition) - we use (Transaction + Pessimistic Locking)
+    # Better use (Optimistic Locking)
+    # Add (Validation - quantity must be > 0)
+    # Add (Cache Invalidation)
     public function updateQuantity($id, $quantity)
     {
-        $cart = Cart::where('id', $id)
-            ->where('user_id', auth()->id())
-            ->first();
+        return DB::transaction(function () use ($id, $quantity) {
+            $cart = Cart::where('id', $id)
+                ->where('user_id', auth()->id())
+                ->first();
 
-        if (!$cart) {
-            return ['error' => 'not found', 'status' => 404];
-        }
+            if (!$cart) {
+                return ['error' => 'Cart item not found', 'status' => 404];
+            }
 
-        $product = Product::find($cart->product_id);
+            $product = Product::lockForUpdate()->find($cart->product_id);
 
-        if (!$product) {
-            return ['error' => 'product not found', 'status' => 404];
-        }
+            if (!$product) {
+                return ['error' => 'Product not found', 'status' => 404];
+            }
 
-        if ($product->quantity < $quantity) {
-            return ['error' => 'الكمية غير متوفرة', 'status' => 422];
-        }
+            if ($product->quantity < $quantity) {
+                return ['error' => 'Not enough stock', 'status' => 422];
+            }
 
-        $cart->update([
-            'quantity' => $quantity,
-        ]);
+            $cart->update(['quantity' => $quantity]);
 
-        return $cart->fresh('product');
+            return $cart->fresh('product');
+        });
     }
 
+    # Add (Pagination - large carts will load all items at once)
+    # Add (Caching (Redis) - cart data changes rarely, good candidate for Cache)
     public function show()
     {
         $cartItems = Cart::where('user_id', auth()->id())
@@ -80,16 +100,30 @@ class CartService
             ->get();
 
         return $cartItems->map(function ($item) {
+            if (!$item->product) {
+                return [
+                    'id'           => $item->id,
+                    'product_id'   => $item->product_id,
+                    'product_name' => 'Product unavailable',
+                    'quantity'     => $item->quantity,
+                    'price'        => null,
+                ];
+            }
+
             return [
-                'id' => $item->id,
-                'product_id' => $item->product_id,
+                'id'           => $item->id,
+                'product_id'   => $item->product_id,
                 'product_name' => $item->product->name,
-                'quantity' => $item->quantity,
-                'price' => $item->product->price,
+                'quantity'     => $item->quantity,
+                'price'        => $item->product->price,
             ];
         });
     }
 
+    # we have (Race Condition) - we use (Transaction + Pessimistic Locking)
+    # Better use (Optimistic Locking)
+    # Add (Cache Invalidation - for both cart and favourites)
+    # Risk: uses raw DB::table() for favourite - inconsistent with Eloquent pattern
     public function moveFavorite(array $data, $favoriteId)
     {
         return DB::transaction(function () use ($data, $favoriteId) {
@@ -99,13 +133,13 @@ class CartService
                 ->first();
 
             if (!$favorite) {
-                return ['error' => 'not found', 'status' => 404];
+                return ['error' => 'Favorite item not found', 'status' => 404];
             }
 
-            $product = Product::find($favorite->product_id);
+            $product = Product::lockForUpdate()->find($favorite->product_id);
 
             if (!$product) {
-                return ['error' => 'product not found', 'status' => 404];
+                return ['error' => 'Product not found', 'status' => 404];
             }
 
             $cartItem = Cart::where('user_id', $favorite->user_id)
@@ -115,20 +149,20 @@ class CartService
             $targetQuantity = ($cartItem?->quantity ?? 0) + $data['quantity'];
 
             if ($product->quantity < $targetQuantity) {
-                return ['error' => 'not enough stock', 'status' => 422];
+                return ['error' => 'Not enough stock', 'status' => 422];
             }
 
             if ($cartItem) {
-                $cartItem->update([
-                    'quantity' => $targetQuantity
-                ]);
+                $cartItem->update(['quantity' => $targetQuantity]);
             } else {
                 $cartItem = Cart::create([
-                    'user_id' => $favorite->user_id,
+                    'user_id'    => $favorite->user_id,
                     'product_id' => $favorite->product_id,
-                    'quantity' => $data['quantity'],
+                    'quantity'   => $data['quantity'],
                 ]);
             }
+
+            DB::table('favourite_of_products')->where('id', $favoriteId)->delete();
 
             return $cartItem;
         });

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 
 class OrderService
 {
+    # Add (Pagination - Caching (Redis) - Batch Processing)
     public function getUserOrders()
     {
         return Order::with('items.product')
@@ -18,6 +19,8 @@ class OrderService
             ->get();
     }
 
+    # we have (Race Condition) - we use ( Transaction + Pessimistic Locking )
+    # Better use Optimistic Locking - Add (Async Queue - Batch Insert - Capacity Control) - Remove Double Lockind
     public function placeOrder()
     {
         $userId = auth()->id();
@@ -29,50 +32,49 @@ class OrderService
                 ->get();
 
             if ($cartItems->isEmpty()) {
-                return $this->error('السلة فارغة');
+                return $this->error('Cart is empty');
             }
 
             $preparedItems = [];
-            $totalPrice = 0;
+            $totalPrice    = 0;
 
             foreach ($cartItems as $cartItem) {
                 $product = Product::lockForUpdate()->find($cartItem->product_id);
 
                 if (!$product) {
-                    return $this->error('المنتج غير موجود', 404);
+                    return $this->error('Product not found', 404);
                 }
 
                 if ($product->quantity < $cartItem->quantity) {
-                    return $this->error("الكمية غير متوفرة للمنتج {$product->name}", 422);
+                    return $this->error("Not enough stock for product: {$product->name}", 422);
                 }
 
                 $unitPrice = (float) $product->price;
 
                 $preparedItems[] = [
-                    'product' => $product,
+                    'product'    => $product,
                     'product_id' => $product->id,
-                    'quantity' => $cartItem->quantity,
-                    'price' => $unitPrice,
+                    'quantity'   => $cartItem->quantity,
+                    'price'      => $unitPrice,
                 ];
 
                 $totalPrice += $unitPrice * $cartItem->quantity;
             }
 
             $order = Order::create([
-                'user_id' => $userId,
+                'user_id'     => $userId,
                 'total_price' => $totalPrice,
-                'status' => 'pending',
+                'status'      => 'pending',
             ]);
 
             foreach ($preparedItems as $item) {
                 $order->items()->create([
                     'product_id' => $item['product_id'],
-                    'quantity' => $item['quantity'],
-                    'price' => $item['price'],
+                    'quantity'   => $item['quantity'],
+                    'price'      => $item['price'],
                 ]);
 
-                $item['product']->quantity -= $item['quantity'];
-                $item['product']->save();
+                $item['product']->decrement('quantity', $item['quantity']);
             }
 
             Cart::where('user_id', $userId)->delete();
@@ -81,6 +83,9 @@ class OrderService
         });
     }
 
+    # we have (data Integrity Problem) - we use (Transaction + Pessimistic Locking) 
+    # we have Race COndition (because we check order status out of Transaction)
+    # Add (Async Notification - Cache Invalidation)
     public function cancelOrder($id)
     {
         $order = Order::with('items')
@@ -89,15 +94,15 @@ class OrderService
             ->first();
 
         if (!$order) {
-            return $this->error('not found', 404);
+            return $this->error('Order not found', 404);
         }
 
         if ($order->status === 'cancelled') {
-            return $this->error('already cancelled');
+            return $this->error('Order is already cancelled');
         }
 
         if ($order->status !== 'pending') {
-            return $this->error('can not cancel this order');
+            return $this->error('This order cannot be cancelled');
         }
 
         return DB::transaction(function () use ($order) {
@@ -105,8 +110,7 @@ class OrderService
                 $product = Product::lockForUpdate()->find($item->product_id);
 
                 if ($product) {
-                    $product->quantity += $item->quantity;
-                    $product->save();
+                    $product->increment('quantity', $item->quantity);
                 }
             }
 
@@ -116,6 +120,7 @@ class OrderService
         });
     }
 
+    # Add (Caching)
     public function show($orderId)
     {
         $order = Order::with('items.product')
@@ -124,12 +129,15 @@ class OrderService
             ->first();
 
         if (!$order) {
-            return $this->error('not found', 404);
+            return $this->error('Order not found', 404);
         }
 
         return $order;
     }
 
+    # we have ( Race Condition + Data Integrity ) - we use (Transaction + Pessimistic Locking)
+    # we have Race COndition (because we check order status out of Transaction)
+    # better use Optimistic Locking - Add (VAlidation for Quantity and Cache Invalidation)
     public function updateProductQuantity($orderId, $productId, $quantity)
     {
         $order = Order::where('id', $orderId)
@@ -137,11 +145,11 @@ class OrderService
             ->first();
 
         if (!$order) {
-            return $this->error('not found', 404);
+            return $this->error('Order not found', 404);
         }
 
         if ($order->status !== 'pending') {
-            return $this->error('can not edit this order');
+            return $this->error('This order cannot be edited');
         }
 
         return DB::transaction(function () use ($order, $productId, $quantity) {
@@ -150,32 +158,35 @@ class OrderService
                 ->first();
 
             if (!$orderItem) {
-                return $this->error('not found', 404);
+                return $this->error('Product not found in this order', 404);
             }
 
             $product = Product::lockForUpdate()->find($productId);
 
             if (!$product) {
-                return $this->error('product not found', 404);
+                return $this->error('Product not found', 404);
+            }
+
+            if ($quantity === 0) {
+                $product->increment('quantity', $orderItem->quantity);
+                $orderItem->delete();
+                $this->recalculateOrderTotal($order);
+
+                return $order->fresh()->load('items.product');
             }
 
             $diff = $quantity - $orderItem->quantity;
 
             if ($diff > 0) {
                 if ($product->quantity < $diff) {
-                    return $this->error('not enough stock', 422);
+                    return $this->error('Not enough stock', 422);
                 }
-
-                $product->quantity -= $diff;
+                $product->decrement('quantity', $diff);
             } elseif ($diff < 0) {
-                $product->quantity += abs($diff);
+                $product->increment('quantity', abs($diff));
             }
 
-            $product->save();
-
-            $orderItem->update([
-                'quantity' => $quantity,
-            ]);
+            $orderItem->update(['quantity' => $quantity]);
 
             $this->recalculateOrderTotal($order);
 
@@ -183,21 +194,22 @@ class OrderService
         });
     }
 
+    # Extra DB query inside Transaction
+    # Better: calculate total directly from $preparedItems in memory
+    # to avoid additional SELECT while locks are held
     private function recalculateOrderTotal(Order $order): void
     {
         $totalPrice = $order->items()
-            ->get()
-            ->sum(fn (OrderItem $item) => $item->quantity * (float) $item->price);
+            ->selectRaw('SUM(quantity * price) as total')
+            ->value('total') ?? 0;
 
-        $order->update([
-            'total_price' => $totalPrice,
-        ]);
+        $order->update(['total_price' => $totalPrice]);
     }
 
     private function error(string $message, int $status = 400): array
     {
         return [
-            'error' => $message,
+            'error'  => $message,
             'status' => $status,
         ];
     }

@@ -3,81 +3,60 @@
 namespace App\Http\Controllers\API\System;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Services\System\FavoriteService;
 use App\Traits\ApiResponseTrait;
 use App\Http\Requests\System\Favorite\AddFavoriteRequest;
 use App\Http\Requests\System\Favorite\RemoveFavoriteRequest;
 use App\Http\Requests\System\Favorite\CheckFavoriteRequest;
+use Illuminate\Http\Request;
 
 class FavoriteController extends Controller
 {
     use ApiResponseTrait;
 
-    private $service;
+    public function __construct(private FavoriteService $service) {}
 
-    public function __construct(FavoriteService $service)
+    public function index(Request $request)
     {
-        $this->service = $service;
+        $perPage = min((int) $request->get('per_page', 15), 100);
+
+        return $this->apiResponse(
+            $this->service->getFavorites($perPage),
+            'Favorites retrieved successfully',
+            200
+        );
     }
 
-    /*
-    |----------------------------------------
-    | GET ALL FAVORITES
-    |----------------------------------------
-    */
-    public function index()
+    public function check(CheckFavoriteRequest $request)
     {
-        $data = $this->service->getFavorites();
+        $result = $this->service->isFavorite($request->product_id);
 
-        if (!$data) {
-            return $this->apiResponse([], 'User not authenticated', 401);
-        }
-
-        return $this->apiResponse($data, 'Favorites retrieved', 200);
+        return $this->apiResponse(
+            ['is_favorite' => $result],
+            'Checked successfully',
+            200
+        );
     }
 
-    /*
-    |----------------------------------------
-    | CHECK FAVORITE
-    |----------------------------------------
-    */
-    public function check($productId)
-    {
-        $result = $this->service->isFavorite($productId);
-
-        return $this->apiResponse($result, 'Checked', 200);
-    }
-
-    /*
-    |----------------------------------------
-    | ADD FAVORITE
-    |----------------------------------------
-    */
     public function store(AddFavoriteRequest $request)
     {
         $result = $this->service->addToFavorite($request->product_id);
 
-        if (!$result['status']) {
-            return $this->apiResponse(null, $result['message'], 400);
-        }
-
-        return $this->apiResponse($result['data'] ?? null, $result['message'], 200);
+        return $this->apiResponse(
+            $result['data'] ?? null,
+            $result['message'],
+            $result['status'] ? $result['code'] : $result['code']
+        );
     }
 
-    /*
-    |----------------------------------------
-    | REMOVE FAVORITE
-    |----------------------------------------
-    */
-    public function destroy($id)
+    public function destroy(RemoveFavoriteRequest $request)
     {
-        $result = $this->service->removeFromFavorite($id);
+        $result = $this->service->removeFromFavorite($request->product_id);
 
-        if (!$result['status']) {
-            return $this->apiResponse(null, $result['message'], 400);
-        }
-
-        return $this->apiResponse(null, $result['message'], 200);
+        return $this->apiResponse(
+            null,
+            $result['message'],
+            $result['code']
+        );
     }
 }

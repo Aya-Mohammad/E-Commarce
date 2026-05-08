@@ -6,15 +6,20 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class StoreProductRequest extends FormRequest
 {
+    public function authorize(): bool
+    {
+        return auth()->check();
+    }
+
     public function rules(): array
     {
         return [
-            'name' => 'required|string',
-            'description' => 'required|string',
-            'price' => 'required',
-            'quantity' => 'required|string',
-            'store_id' => 'required',
-            'image_path' => 'nullable|mimes:jpeg,png,jpg,gif',
+            'name'        => 'required|string|max:255|unique:products,name',
+            'description' => 'required|string|max:2000',
+            'price'       => 'required|numeric|min:0',
+            'quantity'    => 'required|integer|min:0',
+            'store_id'    => 'required|integer|exists:stores,id',
+            'image_path'  => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
         ];
     }
 }

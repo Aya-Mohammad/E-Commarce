@@ -32,8 +32,8 @@ class AuthController extends Controller
     {
         $result = $this->authService->login($request->validated());
 
-        if (! $result) {
-            return $this->apiResponse(null, 'Invalid password', 401);
+        if (!$result) {
+            return $this->apiResponse(null, 'Invalid credentials', 401);
         }
 
         return $this->createNewToken($result['token'], $result['user']);
@@ -56,7 +56,7 @@ class AuthController extends Controller
     {
         $loggedOut = $this->authService->logout();
 
-        if (! $loggedOut) {
+        if (!$loggedOut) {
             return $this->apiResponse(null, 'Invalid or missing token', 401);
         }
 

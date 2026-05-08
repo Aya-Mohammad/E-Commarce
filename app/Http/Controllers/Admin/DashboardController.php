@@ -4,18 +4,19 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\Admin\DashboardService;
+use App\Traits\ApiResponseTrait;
 
 class DashboardController extends Controller
 {
-    protected $dashboardService;
+    use ApiResponseTrait;
 
-    public function __construct(DashboardService $dashboardService)
-    {
-        $this->dashboardService = $dashboardService;
-    }
+    public function __construct(protected DashboardService $dashboardService) {}
 
     public function index()
     {
-        return $this->dashboardService->getStats();
+        return $this->apiResponse(
+            $this->dashboardService->getStats(),
+            'Dashboard stats fetched successfully'
+        );
     }
 }

@@ -3,115 +3,128 @@
 namespace App\Services\Admin;
 
 use App\Models\Store;
-use App\Traits\ApiResponseTrait;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class StoreService
 {
-    use ApiResponseTrait;
-
-    public function getAllStores()
+    # Add (Caching (Redis) - store list is static data, high read frequency)
+    # Add (Cache Invalidation - when store is created/updated/deleted)
+    # Pagination already exists 
+    public function getAllStores(int $perPage = 15)
     {
-        $stores = Store::with('image')->get();
-
-        return $this->apiResponse(['stores' => $stores], 'Stores fetched successfully');
+        return Store::with('image')->paginate($perPage);
     }
 
-    public function createStore($request)
+    # Add (Async Queue - image processing should be done in background Job)
+    # Add (Cache Invalidation - invalidate store list cache after creation)
+    # Risk: Orphan Files - images stored inside Transaction, if Transaction fails
+    # DB rolls back but files remain on disk
+    # Fix: store images AFTER DB commit, not inside Transaction
+    # Risk: no max limit on number of images per store (Capacity Control missing)
+    public function createStore(array $data, array $images = []): Store
     {
         DB::beginTransaction();
 
         try {
             $store = Store::create([
-                'name' => $request->name,
-                'description' => $request->description,
-                'delivery_cost' => $request->delivery_cost,
-                'distance' => $request->distance,
-                'start_of_work' => $request->start_of_work,
-                'end_of_work' => $request->end_of_work,
+                'name'          => $data['name'],
+                'description'   => $data['description'],
+                'delivery_cost' => $data['delivery_cost'],
+                'distance'      => $data['distance'],
+                'start_of_work' => $data['start_of_work'],
+                'end_of_work'   => $data['end_of_work'],
             ]);
 
-            if ($request->hasFile('image_path')) {
-
-    $images = $request->file('image_path');
-    $images = is_array($images) ? $images : [$images];
-
-    foreach ($images as $img) {
-        $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
-        $img->move(public_path('uploads/stores'), $fileName);
-
-        $store->image()->create([
-            'image_path' => url("uploads/stores/$fileName"),
-        ]);
-    }
-}
-
-            DB::commit();
-
-            return $this->apiResponse([
-                'store' => $store
-            ], 'Store created');
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return $this->apiResponse(null, 'Error creating store', 500, ['exception' => [$e->getMessage()]]);
-        }
-    }
-
-    public function updateStore($id, $request)
-    {
-        $store = Store::findOrFail($id);
-        $validatedData = $request->validated();
-        DB::beginTransaction();
-
-        try {
-            $store->update($validatedData);
-
-            if ($request->hasFile('image_path')) {
-                $images = $request->file('image_path');
-                $images = is_array($images) ? $images : [$images];
-
-                foreach ($images as $img) {
-                    $fileName = Str::uuid() . '_' . $img->getClientOriginalName();
-                    $img->move(public_path('uploads/stores'), $fileName);
-
-                    $store->image()->create([
-                        'image_path' => url("uploads/stores/$fileName"),
-                    ]);
+            foreach ($images as $img) {
+                if (!in_array($img->getMimeType(), ['image/jpeg', 'image/png'])) {
+                    continue;
                 }
+
+                $fileName = Str::uuid() . '.' . strtolower($img->getClientOriginalExtension());
+
+                $path = $img->storeAs('uploads/stores', $fileName, 'private');
+
+                $store->image()->create(['image_path' => $path]);
             }
 
             DB::commit();
 
-            // Reload the model from database to get fresh data
-            $store = Store::with('image')->findOrFail($id);
-
-            return $this->apiResponse([
-                'store' => $store
-            ], 'Store updated');
+            return $store->load('image');
 
         } catch (\Exception $e) {
             DB::rollBack();
-
-            return $this->apiResponse(null, 'Error updating store', 500, ['exception' => [$e->getMessage()]]);
+            Log::error('Error creating store: ' . $e->getMessage());
+            throw $e;
         }
     }
 
-    public function getStoreById($id)
-    {
-        $store = Store::with('image')->findOrFail($id);
-
-        return $this->apiResponse(['store' => $store], 'Store fetched successfully');
-    }
-
-    public function deleteStore($id)
+    # Add (Async Queue - image processing should be done in background Job)
+    # Add (Cache Invalidation - invalidate store cache after update)
+    # Risk: Orphan Files - same problem as createStore()
+    # Risk: Storage Leak - old images not deleted when new ones uploaded
+    # Fix: delete old images from disk before storing new ones
+    # Risk: no max limit on number of images (Capacity Control missing)
+    public function updateStore(int $id, array $data, array $images = []): Store
     {
         $store = Store::findOrFail($id);
 
-        $store->delete();
+        DB::beginTransaction();
 
-        return $this->apiResponse(null, 'Store deleted');
+        try {
+            $store->update(array_filter(
+                array_intersect_key($data, array_flip([
+                    'name', 'description', 'delivery_cost',
+                    'distance', 'start_of_work', 'end_of_work'
+                ])),
+                fn($value) => !is_null($value)
+            ));
+
+            foreach ($images as $img) {
+                if (!in_array($img->getMimeType(), ['image/jpeg', 'image/png'])) {
+                    continue;
+                }
+
+                $fileName = Str::uuid() . '.' . strtolower($img->getClientOriginalExtension());
+                $path     = $img->storeAs('uploads/stores', $fileName, 'private');
+
+                $store->image()->create(['image_path' => $path]);
+            }
+
+            DB::commit();
+
+            return $store->fresh('image');
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error updating store: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    # Add (Caching (Redis) - single store data, good Cache candidate)
+    # Add (Cache Invalidation - when store is updated or deleted)
+    public function getStoreById(int $id): Store
+    {
+        return Store::with('image')->findOrFail($id);
+    }
+
+    # Add (Cache Invalidation - invalidate store cache and store list cache)
+    # Add (Async Queue - image deletion from disk should be done in background Job)
+    # Risk: if Storage::delete() fails, store is already deleted from DB (no Transaction)
+    # Fix: wrap in Transaction and handle storage failure gracefully
+    # Risk: no check if store has active products or pending orders before deletion
+    # Deleting store will cascade delete products → may affect active orders
+    public function deleteStore(int $id): void
+    {
+        $store = Store::with('image')->findOrFail($id);
+
+        foreach ($store->image as $image) {
+            Storage::disk('private')->delete($image->image_path);
+        }
+
+        $store->delete();
     }
 }

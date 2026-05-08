@@ -7,13 +7,18 @@ use App\Models\Admin;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class AdminAuthService
 {
-    public function login($data)
+    # Add (Rate Limiting - no brute force protection for admin panel)
+    # Critical: admin login with no rate limit is a serious security risk
+    # Add (Async Notification - notify admin on new login (security alert))
+    # Missing: no logging of admin login attempts (IP, time, device)
+    public function login(array $data): ?array
     {
-        if (! $token = Auth::guard('admin')->attempt($data)) {
+        if (!$token = Auth::guard('admin')->attempt($data)) {
             return null;
         }
 
@@ -23,31 +28,46 @@ class AdminAuthService
         ];
     }
 
-    public function register($request)
+    # Add (Async Queue - image processing should be done in background Job)
+    # Risk: Orphan Files - image stored inside Transaction
+    # same problem as AuthService::register()
+    # Fix: store image AFTER DB commit
+    # Risk: no restriction on who can register as admin
+    # any request can create a new admin - missing authorization check
+    public function register(array $data): array
     {
         DB::beginTransaction();
 
         try {
             $admin = Admin::create([
-                'name' => $request->name,
-                'username' => $request->username,
-                'email' => $request->email,
-                'phone' => $request->phone,
-                'password' => Hash::make($request->password),
+                'name'     => $data['name'],
+                'username' => $data['username'],
+                'email'    => $data['email'],
+                'phone'    => $data['phone'],
+                'password' => Hash::make($data['password']),
             ]);
 
-            $imageUrl = null;
+            $imagePath = null;
 
-            if ($request->hasFile('image_path')) {
-                $originalName = $request->file('image_path')->getClientOriginalName();
-                $fileName = Str::uuid().'_'.$originalName;
+            if (isset($data['image_path'])) {
+                $file = $data['image_path'];
 
-                $request->file('image_path')->move(public_path("uploads/admin/$request->phone"), $fileName);
+                $realMimeType = $file->getMimeType();
+                if (!in_array($realMimeType, ['image/jpeg', 'image/png'])) {
+                    throw new \Exception('Invalid file type.');
+                }
 
-                $imageUrl = url("uploads/admin/$request->phone/$fileName");
+                $extension = strtolower($file->getClientOriginalExtension());
+                $fileName  = Str::uuid() . '.' . $extension;
+
+                $imagePath = $file->storeAs(
+                    "uploads/admins/{$data['phone']}",
+                    $fileName,
+                    'private'
+                );
 
                 $admin->image()->create([
-                    'image_path' => $imageUrl,
+                    'image_path' => $imagePath, 
                 ]);
             }
 
@@ -55,9 +75,12 @@ class AdminAuthService
 
             DB::commit();
 
+            $admin->load('image');
+
             return [
-                'admin' => new AdminResource($admin),
-                'token' => $token,
+                'admin'      => new AdminResource($admin),
+                'token'      => $token,
+                'image_path' => $imagePath,
             ];
 
         } catch (\Exception $e) {
@@ -66,13 +89,25 @@ class AdminAuthService
         }
     }
 
-    public function logout()
+    # Missing: no token invalidation (JWT token remains valid after logout)
+    # compare with AuthService::logout() which uses JWTAuth::invalidate()
+    # this logout only clears the session, token still usable
+    # Missing: no fcm_token clearing on admin logout
+    public function logout(): void
     {
         Auth::guard('admin')->logout();
     }
 
-    public function getUser()
+    # Add (Caching (Redis) - called on every authenticated request)
+    # short TTL Cache per admin session
+    public function getUser(): ?AdminResource
     {
-        return new AdminResource(Auth::guard('admin')->user());
+        $admin = Auth::guard('admin')->user();
+
+        if (!$admin) {
+            return null;
+        }
+
+        return new AdminResource($admin);
     }
 }

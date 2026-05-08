@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\User;
 use App\Http\Resources\UserResource;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -15,36 +14,41 @@ class ProfileService
         return new UserResource($user->load('image'));
     }
 
-    public function updateProfile($request, $user)
+    public function updateProfile(array $data, $user)
     {
         DB::beginTransaction();
 
         try {
             $user->update([
-                'first_name' => $request->first_name,
-                'last_name'  => $request->last_name,
-                'location'   => $request->location,
+                'first_name' => $data['first_name'],
+                'last_name'  => $data['last_name'],
+                'location'   => $data['location'],
             ]);
 
-            if ($request->hasFile('image_path')) {
+            if (isset($data['image_path'])) {
+                $file = $data['image_path'];
 
-                if ($user->image && $user->image->image_path) {
-                    Storage::disk('public')->delete($user->image->image_path);
+                $realMimeType = $file->getMimeType();
+                if (!in_array($realMimeType, ['image/jpeg', 'image/png'])) {
+                    throw new \Exception('Invalid file type.');
                 }
 
-                $file = $request->file('image_path');
-                $fileName = Str::uuid() . '_' . $file->getClientOriginalName();
+                if ($user->image && $user->image->image_path) {
+                    Storage::disk('private')->delete($user->image->image_path);
+                }
 
-                $path = $file->move(
-                    public_path("uploads/users/{$user->phone}"),
-                    $fileName
+                $extension = strtolower($file->getClientOriginalExtension());
+                $fileName  = Str::uuid() . '.' . $extension;
+
+                $path = $file->storeAs(
+                    "uploads/users/{$user->phone}",
+                    $fileName,
+                    'private'
                 );
-
-                $url = url("uploads/users/{$user->phone}/$fileName");
 
                 $user->image()->updateOrCreate(
                     [],
-                    ['image_path' => $url]
+                    ['image_path' => $path] 
                 );
             }
 

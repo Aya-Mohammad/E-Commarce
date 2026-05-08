@@ -4,7 +4,6 @@ namespace App\Http\Controllers\API\System;
 
 use App\Http\Controllers\Controller;
 use App\Traits\ApiResponseTrait;
-
 use App\Services\System\CartService;
 use App\Http\Requests\System\Cart\AddToCartRequest;
 use App\Http\Requests\System\Cart\MoveFavoriteRequest;
@@ -16,68 +15,47 @@ class CartController extends Controller
 
     public function __construct(private CartService $service) {}
 
-    /*
-    |----------------------------------------
-    | ADD TO CART
-    |----------------------------------------
-    */
     public function add(AddToCartRequest $request)
     {
         return $this->respond(
             $this->service->add($request->validated()),
-            'Added',
+            'Product added to cart successfully',
             200
         );
     }
 
-    /*
-    |----------------------------------------
-    | REMOVE FROM CART
-    |----------------------------------------
-    */
     public function remove($id)
     {
-        return $this->respond($this->service->remove($id), 'Removed', 200);
+        return $this->respond(
+            $this->service->remove($id),
+            'Product removed from cart successfully',
+            200
+        );
     }
 
-    /*
-    |----------------------------------------
-    | UPDATE CART QUANTITY
-    |----------------------------------------
-    */
     public function updateQuantity(UpdateCartQuantityRequest $request, $id)
     {
         return $this->respond(
             $this->service->updateQuantity($id, $request->quantity),
-            'Updated',
+            'Cart quantity updated successfully',
             200
         );
     }
 
-    /*
-    |----------------------------------------
-    | SHOW CART
-    |----------------------------------------
-    */
     public function show()
     {
         return $this->apiResponse(
             $this->service->show(),
-            'Cart data',
+            'Cart fetched successfully',
             200
         );
     }
 
-    /*
-    |----------------------------------------
-    | MOVE FAVORITE TO CART
-    |----------------------------------------
-    */
     public function moveFavorite(MoveFavoriteRequest $request, $favoriteId)
     {
         return $this->respond(
             $this->service->moveFavorite($request->validated(), $favoriteId),
-            'Moved',
+            'Item moved to cart successfully',
             200
         );
     }

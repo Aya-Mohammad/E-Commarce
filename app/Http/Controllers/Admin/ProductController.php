@@ -4,40 +4,71 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\Admin\ProductService;
-use App\Http\Requests\System\Product\StoreProductRequest;
-use App\Http\Requests\System\Store\UpdateProductRequest;
+// ✅ إصلاح الاستيراد — Admin Requests وليس System
+use App\Http\Requests\Admin\Product\StoreProductRequest;
+use App\Http\Requests\Admin\Product\UpdateProductRequest;
+use App\Traits\ApiResponseTrait;
+use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
-    protected $productService;
+    use ApiResponseTrait;
 
-    public function __construct(ProductService $productService)
-    {
-        $this->productService = $productService;
-    }
+    public function __construct(protected ProductService $productService) {}
 
-    public function index()
+    public function index(Request $request)
     {
-        return $this->productService->getAllProducts();
+        $perPage = min((int) $request->get('per_page', 15), 100);
+
+        return $this->apiResponse(
+            $this->productService->getAllProducts($perPage),
+            'Products fetched successfully'
+        );
     }
 
     public function store(StoreProductRequest $request)
     {
-        return $this->productService->createProduct($request);
+        try {
+            $product = $this->productService->createProduct(
+                $request->validated(),
+                $request->file('images', [])
+            );
+
+            return $this->apiResponse($product, 'Product created successfully', 201);
+
+        } catch (\Exception $e) {
+            return $this->apiResponse(null, 'Error creating product', 500);
+        }
     }
 
     public function show($id)
     {
-        return $this->productService->getProductById($id);
+        return $this->apiResponse(
+            $this->productService->getProductById($id),
+            'Product fetched successfully'
+        );
     }
 
     public function update(UpdateProductRequest $request, $id)
     {
-        return $this->productService->updateProduct($id, $request);
+        try {
+            $product = $this->productService->updateProduct(
+                $id,
+                $request->validated(),
+                $request->file('images', [])
+            );
+
+            return $this->apiResponse($product, 'Product updated successfully');
+
+        } catch (\Exception $e) {
+            return $this->apiResponse(null, 'Error updating product', 500);
+        }
     }
 
     public function destroy($id)
     {
-        return $this->productService->deleteProduct($id);
+        $this->productService->deleteProduct($id);
+
+        return $this->apiResponse(null, 'Product deleted successfully');
     }
 }

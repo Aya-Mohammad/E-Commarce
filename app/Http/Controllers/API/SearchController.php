@@ -15,21 +15,24 @@ class SearchController extends Controller
     public function search(Request $request)
     {
         $request->validate([
-            'search' => 'required|string|max:255',
+            'search'   => 'required|string|max:100',
+            'per_page' => 'nullable|integer|min:1|max:50',
         ]);
 
-        $query = $request->input('search');
+        $query   = $request->input('search');
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query);
+        $perPage = $request->get('per_page', 15);
 
         $stores = Store::with('image')
-            ->where('name', 'like', "%{$query}%")
-            ->get();
+            ->where('name', 'like', "%{$escaped}%")
+            ->paginate($perPage, ['*'], 'stores_page');
 
         $products = Product::with('image')
-            ->where('name', 'like', "%{$query}%")
-            ->get();
+            ->where('name', 'like', "%{$escaped}%")
+            ->paginate($perPage, ['*'], 'products_page');
 
         return $this->apiResponse([
-            'stores' => $stores,
+            'stores'   => $stores,
             'products' => $products,
         ], 'Search results fetched successfully');
     }

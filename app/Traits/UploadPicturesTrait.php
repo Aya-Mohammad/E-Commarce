@@ -3,6 +3,7 @@
 namespace App\Traits;
 
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 trait UploadPicturesTrait
 {
@@ -14,11 +15,16 @@ trait UploadPicturesTrait
 
         $file = $request->file($fileKey);
 
-        $originalName = $file->getClientOriginalName();
-        $fileName = Str::uuid() . '_' . $originalName;
+        $realMimeType = $file->getMimeType();
+        if (!in_array($realMimeType, ['image/jpeg', 'image/png'])) {
+            return null;
+        }
 
-        $path = $file->move(public_path($folderName), $fileName);
+        $extension = strtolower($file->getClientOriginalExtension());
+        $fileName  = Str::uuid() . '.' . $extension;
 
-        return url("$folderName/$fileName");
+        $path = $file->storeAs($folderName, $fileName, 'private');
+
+        return Storage::disk('private')->url($path);
     }
 }

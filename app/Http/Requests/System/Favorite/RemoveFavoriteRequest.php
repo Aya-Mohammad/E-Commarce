@@ -6,15 +6,15 @@ use Illuminate\Foundation\Http\FormRequest;
 
 class RemoveFavoriteRequest extends FormRequest
 {
-    public function authorize()
+    public function authorize(): bool
     {
-        return true;
+        return auth()->check();
     }
 
-    public function rules()
+    public function rules(): array
     {
         return [
-            'product_id' => 'required|exists:products,id',
+            'product_id' => 'required|integer|exists:products,id',
         ];
     }
 }

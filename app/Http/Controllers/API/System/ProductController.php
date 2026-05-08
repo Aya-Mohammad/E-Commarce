@@ -13,31 +13,25 @@ class ProductController extends Controller
 
     public function __construct(private ProductService $service) {}
 
-    /*
-    |----------------------------------------
-    | GET ALL PRODUCTS
-    |----------------------------------------
-    */
     public function index(Request $request)
     {
+        $perPage = min((int) $request->get('per_page', 15), 100);
+
         return $this->apiResponse(
-            $this->service->index(),
-            'Products retrieved',
+            $this->service->index($perPage),
+            'Products retrieved successfully',
             200
         );
     }
 
-    /*
-    |----------------------------------------
-    | GET SINGLE PRODUCT
-    |----------------------------------------
-    */
     public function show($id)
     {
-        return $this->apiResponse(
-            $this->service->show($id),
-            'OK',
-            200
-        );
+        $product = $this->service->show($id);
+
+        if (!$product) {
+            return $this->apiResponse(null, 'Product not found', 404);
+        }
+
+        return $this->apiResponse($product, 'Product retrieved successfully', 200);
     }
 }

@@ -5,59 +5,61 @@ namespace App\Services\Admin;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
-use App\Traits\ApiResponseTrait;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OrderService
 {
-    use ApiResponseTrait;
-
-    public function handleOrder($orderId)
+    # we have (Race Condition) - status check happens OUTSIDE Transaction
+    # Two admin requests can pass the status check simultaneously
+    # Fix: move order fetch + status check INSIDE Transaction with lockForUpdate()
+    public function handleOrder(int $orderId, string $action): array
     {
         $order = Order::find($orderId);
 
-        if (! $order) {
-            return $this->apiResponse(null, 'Order not found', 404);
+        if (!$order) {
+            return ['error' => 'Order not found', 'status' => 404];
         }
 
         if ($order->status !== 'pending') {
-            return $this->apiResponse(null, 'Can\'t edit this order', 400);
+            return ['error' => 'Cannot edit this order', 'status' => 400];
         }
-
-        $action = request()->input('action');
 
         if ($action === 'approve') {
             return $this->approveOrder($order);
         }
 
-        if ($action === 'reject') {
-            return $this->rejectOrder($order);
-        }
-
-        return $this->apiResponse(null, 'Wrong action', 400);
+        return $this->rejectOrder($order);
     }
 
-    private function approveOrder($order)
+    # Add (Async Notification - notify user when order is approved via Queue)
+    # Add (Cache Invalidation - invalidate order cache after status change)
+    # Risk: no lockForUpdate() on order before update - Race Condition with rejectOrder()
+    private function approveOrder(Order $order): array
     {
         DB::beginTransaction();
 
         try {
-            $order->status = 'approved';
-            $order->save();
+            $order->update(['status' => 'approved']);
 
             DB::commit();
 
-            return $this->apiResponse([
-                'order' => $order->load('items.product', 'user'),
-            ], 'Order approved');
+            return ['data' => $order->load('items.product', 'user')];
+
         } catch (\Exception $e) {
             DB::rollBack();
-
-            return $this->apiResponse(null, 'Failed to process order', 500, ['exception' => [$e->getMessage()]]);
+            Log::error('Error approving order: ' . $e->getMessage());
+            throw $e;
         }
     }
 
-    private function rejectOrder($order)
+    # we have (Race Condition) - uses Pessimistic Locking on Product 
+    # but NO lockForUpdate() on Order itself before status update
+    # Add (Async Notification - notify user when order is rejected via Queue)
+    # Add (Cache Invalidation - invalidate order cache after status change)
+    # Add (Batch Processing - product quantity restore done one by one in foreach)
+    # Better: use single batch update instead of loop
+    private function rejectOrder(Order $order): array
     {
         DB::beginTransaction();
 
@@ -68,47 +70,45 @@ class OrderService
                 $product = Product::lockForUpdate()->find($item->product_id);
 
                 if ($product) {
-                    $product->quantity += $item->quantity;
-                    $product->save();
+                    $product->increment('quantity', $item->quantity);
                 }
             }
 
-            $order->status = 'rejected';
-            $order->save();
+            $order->update(['status' => 'rejected']);
 
             DB::commit();
 
-            return $this->apiResponse([
-                'order' => $order->load('items.product', 'user'),
-            ], 'Order rejected');
+            return ['data' => $order->load('items.product', 'user')];
+
         } catch (\Exception $e) {
             DB::rollBack();
-
-            return $this->apiResponse(null, 'Error while rejecting order', 500, ['exception' => [$e->getMessage()]]);
+            Log::error('Error rejecting order: ' . $e->getMessage());
+            throw $e;
         }
     }
 
-    public function getAllOrders($status = null)
+    # Add (Caching (Redis) - filtered order lists can be cached per status)
+    # Add (Cache Invalidation - when any order status changes)
+    # Pagination already exists 
+    # Filtering by status already exists 
+    public function getAllOrders(?string $status = null, int $perPage = 15)
     {
+        $allowed = ['pending', 'approved', 'rejected', 'delivered', 'cancelled'];
+
         $query = Order::with('items.product', 'user');
 
-        if ($status) {
+        if ($status && in_array($status, $allowed)) {
             $query->where('status', $status);
         }
 
-        $orders = $query->orderBy('created_at', 'desc')->get();
-
-        return $this->apiResponse(['orders' => $orders], 'Orders fetched successfully');
+        return $query->orderBy('created_at', 'desc')->paginate($perPage);
     }
 
-    public function getOrderById($id)
+    # Add (Caching (Redis) - single order data, good Cache candidate)
+    # Add (Cache Invalidation - when order is updated/cancelled/approved/rejected)
+    # Missing: no ownership check - any admin can see any order (this is fine for admin)
+    public function getOrderById(int $id): ?Order
     {
-        $order = Order::with('items.product', 'user')->find($id);
-
-        if (! $order) {
-            return $this->apiResponse(null, 'Order not found', 404);
-        }
-
-        return $this->apiResponse(['order' => $order], 'Order fetched successfully');
+        return Order::with('items.product', 'user')->find($id);
     }
 }

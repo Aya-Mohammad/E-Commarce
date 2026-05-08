@@ -8,7 +8,7 @@ class UpdateProfileRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        return auth()->check();
     }
 
     public function rules(): array
@@ -17,7 +17,7 @@ class UpdateProfileRequest extends FormRequest
             'first_name' => 'required|string|between:3,25',
             'last_name'  => 'required|string|between:3,25',
             'location'   => 'required|string|between:2,50',
-            'image_path' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'image_path' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
         ];
     }
 }
