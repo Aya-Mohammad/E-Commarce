@@ -4,7 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class FavouriteOfProduct extends Model
+class Favourite extends Model
 {
     protected $fillable = ['user_id', 'product_id'];
     public function user()

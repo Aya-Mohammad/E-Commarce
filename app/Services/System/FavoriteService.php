@@ -2,7 +2,7 @@
 
 namespace App\Services\System;
 
-use App\Models\FavouriteOfProduct;
+use App\Models\Favourite;
 use App\Models\Product;
 use Illuminate\Support\Facades\Auth;
 
@@ -13,7 +13,7 @@ class FavoriteService
     # Pagination already exists 
     public function getFavorites(int $perPage = 15)
     {
-        return Product::whereHas('favouriteofproduct', function ($query) {
+        return Product::whereHas('Favourite', function ($query) {
             $query->where('user_id', auth()->id());
         })->with('image')->paginate($perPage);
     }
@@ -26,14 +26,11 @@ class FavoriteService
             return false;
         }
 
-        return FavouriteOfProduct::where('user_id', auth()->id())
+        return Favourite::where('user_id', auth()->id())
             ->where('product_id', (int) $productId)
             ->exists();
     }
 
-    # we have (Race Condition) - two simultaneous requests can pass the $existing check
-    # and insert duplicate favorites at the same time
-    # Fix: use (firstOrCreate) or (unique DB constraint on user_id + product_id)
     # Add (Cache Invalidation - invalidate user favorites cache after adding)
     # ID Validation already exists 
     public function addToFavorite($productId): array
@@ -48,15 +45,7 @@ class FavoriteService
             return ['status' => false, 'message' => 'Product not found', 'code' => 404];
         }
 
-        $existing = FavouriteOfProduct::where('user_id', auth()->id())
-            ->where('product_id', $productId)
-            ->first();
-
-        if ($existing) {
-            return ['status' => false, 'message' => 'Product already in favorites', 'code' => 409];
-        }
-
-        $fav = FavouriteOfProduct::create([
+        $fav = Favourite::firstOrCreate([
             'user_id'    => auth()->id(),
             'product_id' => $productId,
         ]);
@@ -80,7 +69,7 @@ class FavoriteService
             return ['status' => false, 'message' => 'Invalid product ID', 'code' => 422];
         }
 
-        $fav = FavouriteOfProduct::where('user_id', auth()->id())
+        $fav = Favourite::where('user_id', auth()->id())
             ->where('product_id', (int) $productId)
             ->first();
 

@@ -1,7 +1,5 @@
 <?php
 
-use App\Models\Cart;
-use App\Models\DeteilsOfOrder;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Migrations\Migration;

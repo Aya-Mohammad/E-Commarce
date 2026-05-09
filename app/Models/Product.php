@@ -8,8 +8,11 @@ use App\Models\Picture;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\FavouriteOfProduct;
 use App\Services\FCMService;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
 class Product extends Model
 {
+    use HasFactory;
     protected $fillable = ['name', 'description', 'price', 'quantity', 'store_id'];
 
     public function image()

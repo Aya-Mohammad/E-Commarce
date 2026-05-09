@@ -7,126 +7,202 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Cart;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class OrderService
 {
-    # Add (Pagination - Caching (Redis) - Batch Processing)
+    # Pagination + Distributed Caching (6)
     public function getUserOrders()
     {
-        return Order::with('items.product')
-            ->where('user_id', auth()->id())
-            ->orderBy('created_at', 'desc')
-            ->get();
+        $page = request('page', 1);
+
+        return Cache::remember(
+            "user_orders_" . auth()->id() . "_page_" . $page,
+            60,
+            function () {
+
+                return Order::with('items.product')
+                    ->where('user_id', auth()->id())
+                    ->orderBy('created_at', 'desc')
+                    ->paginate(10);
+            }
+        );
     }
 
-    # we have (Race Condition) - we use ( Transaction + Pessimistic Locking )
-    # Better use Optimistic Locking - Add (Async Queue - Batch Insert - Capacity Control) - Remove Double Lockind
-    public function placeOrder()
+    # Add Async Queue ________________________________________
+   public function placeOrder()
     {
         $userId = auth()->id();
 
-        return DB::transaction(function () use ($userId) {
-            $cartItems = Cart::where('user_id', $userId)
-                ->with('product')
-                ->lockForUpdate()
-                ->get();
+        /**
+         * Capacity Control
+         * Maximum different products allowed in cart
+         */
+        $maxCartItems = 50;
 
-            if ($cartItems->isEmpty()) {
-                return $this->error('Cart is empty');
-            }
+        $cartItemsCount = Cart::where('user_id', $userId)->count();
 
-            $preparedItems = [];
-            $totalPrice    = 0;
+        # Capacity Control (2)
+        if ($cartItemsCount > $maxCartItems) {
+            return $this->error(
+                "Cart cannot exceed {$maxCartItems} different products",
+                422
+            );
+        }
 
-            foreach ($cartItems as $cartItem) {
-                $product = Product::lockForUpdate()->find($cartItem->product_id);
+        # Distributed Lock (1)
+        $lock = Cache::lock("place_order_{$userId}", 10);
 
-                if (!$product) {
-                    return $this->error('Product not found', 404);
+        if (!$lock->get()) {
+            return $this->error('Another order is being processed', 429);
+        }
+
+        try {
+
+            return DB::transaction(function () use ($userId) {
+
+                $cartItems = Cart::where('user_id', $userId)
+                    ->with('product')
+                    ->get();
+
+                if ($cartItems->isEmpty()) {
+                    return $this->error('Cart is empty');
                 }
 
-                if ($product->quantity < $cartItem->quantity) {
-                    return $this->error("Not enough stock for product: {$product->name}", 422);
+                $productIds = $cartItems->pluck('product_id')
+                    ->sort()
+                    ->values();
+
+                # Pessimistic Locking (1) - Handle Race Conditions
+                $products = Product::whereIn('id', $productIds)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                $preparedItems = [];
+                $totalPrice    = 0;
+
+                foreach ($cartItems as $cartItem) {
+
+                    $product = $products->get($cartItem->product_id);
+
+                    if (!$product) {
+                        return $this->error('Product not found', 404);
+                    }
+
+                    if ($product->quantity < $cartItem->quantity) {
+                        return $this->error(
+                            "Not enough stock for product: {$product->name}",
+                            422
+                        );
+                    }
+
+                    $unitPrice = (float) $product->price;
+
+                    $preparedItems[] = [
+                        'product'    => $product,
+                        'product_id' => $product->id,
+                        'quantity'   => $cartItem->quantity,
+                        'price'      => $unitPrice,
+                    ];
+
+                    $totalPrice += $unitPrice * $cartItem->quantity;
                 }
 
-                $unitPrice = (float) $product->price;
-
-                $preparedItems[] = [
-                    'product'    => $product,
-                    'product_id' => $product->id,
-                    'quantity'   => $cartItem->quantity,
-                    'price'      => $unitPrice,
-                ];
-
-                $totalPrice += $unitPrice * $cartItem->quantity;
-            }
-
-            $order = Order::create([
-                'user_id'     => $userId,
-                'total_price' => $totalPrice,
-                'status'      => 'pending',
-            ]);
-
-            foreach ($preparedItems as $item) {
-                $order->items()->create([
-                    'product_id' => $item['product_id'],
-                    'quantity'   => $item['quantity'],
-                    'price'      => $item['price'],
+                $order = Order::create([
+                    'user_id'     => $userId,
+                    'total_price' => $totalPrice,
+                    'status'      => 'pending',
                 ]);
 
-                $item['product']->decrement('quantity', $item['quantity']);
-            }
+                # Batch Insert (4)
+                $orderItems = [];
 
-            Cart::where('user_id', $userId)->delete();
+                foreach ($preparedItems as $item) {
 
-            return $order->load('items.product');
-        });
+                    $orderItems[] = [
+                        'order_id'   => $order->id,
+                        'product_id' => $item['product_id'],
+                        'quantity'   => $item['quantity'],
+                        'price'      => $item['price'],
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+
+                    $item['product']->decrement(
+                        'quantity',
+                        $item['quantity']
+                    );
+                }
+
+                OrderItem::insert($orderItems);
+
+                Cart::where('user_id', $userId)->delete();
+
+                # Clear User Orders Cache
+                Cache::tags(['user_orders', $userId])->flush();
+
+                return $order->load('items.product');
+            });
+
+        } finally {
+            $lock->release();
+        }
     }
-
-    # we have (data Integrity Problem) - we use (Transaction + Pessimistic Locking) 
-    # we have Race COndition (because we check order status out of Transaction)
-    # Add (Async Notification - Cache Invalidation)
+    # Add Async Notification_______________________________________________
     public function cancelOrder($id)
     {
-        $order = Order::with('items')
-            ->where('id', $id)
+        return DB::transaction(function () use ($id) {
+
+        # Pessimistic Locking (1) - Handle Race Conditions
+        $order = Order::where('id', $id)
             ->where('user_id', auth()->id())
+            ->lockForUpdate()
+            ->with('items')
             ->first();
 
         if (!$order) {
             return $this->error('Order not found', 404);
         }
 
-        if ($order->status === 'cancelled') {
-            return $this->error('Order is already cancelled');
-        }
-
         if ($order->status !== 'pending') {
             return $this->error('This order cannot be cancelled');
         }
 
-        return DB::transaction(function () use ($order) {
-            foreach ($order->items as $item) {
-                $product = Product::lockForUpdate()->find($item->product_id);
+        foreach ($order->items as $item) {
+            $product = Product::where('id', $item->product_id)
+                ->lockForUpdate()
+                ->first();
 
-                if ($product) {
-                    $product->increment('quantity', $item->quantity);
-                }
+            if ($product) {
+                $product->increment('quantity', $item->quantity);
+
+                # Cache Invalidation (part of 6)
+                Cache::forget("product:{$product->id}");
             }
+        }
 
-            $order->update(['status' => 'cancelled']);
+        $order->update(['status' => 'cancelled']);
 
-            return $order->fresh()->load('items.product');
-        });
+        # Cache Invalidation (part of 6)
+        Cache::forget("order:{$order->id}");
+
+        return $order->fresh()->load('items.product');
+    });
     }
 
-    # Add (Caching)
     public function show($orderId)
     {
-        $order = Order::with('items.product')
-            ->where('id', $orderId)
-            ->where('user_id', auth()->id())
-            ->first();
+        $cacheKey = 'order_' . auth()->id() . '_' . $orderId;
+
+        # Distributed Caching (6)
+        $order = Cache::remember($cacheKey, 300, function () use ($orderId) {
+            return Order::with('items.product')
+                ->where('id', $orderId)
+                ->where('user_id', auth()->id())
+                ->first();
+        });
 
         if (!$order) {
             return $this->error('Order not found', 404);
@@ -135,24 +211,29 @@ class OrderService
         return $order;
     }
 
-    # we have ( Race Condition + Data Integrity ) - we use (Transaction + Pessimistic Locking)
-    # we have Race COndition (because we check order status out of Transaction)
-    # better use Optimistic Locking - Add (VAlidation for Quantity and Cache Invalidation)
     public function updateProductQuantity($orderId, $productId, $quantity)
     {
-        $order = Order::where('id', $orderId)
-            ->where('user_id', auth()->id())
-            ->first();
-
-        if (!$order) {
-            return $this->error('Order not found', 404);
+        # Capacity Control (2)
+        if (!is_numeric($quantity) || $quantity < 0) {
+            return $this->error('Invalid quantity value', 422);
         }
 
-        if ($order->status !== 'pending') {
-            return $this->error('This order cannot be edited');
-        }
+        return DB::transaction(function () use ($orderId, $productId, $quantity) {
 
-        return DB::transaction(function () use ($order, $productId, $quantity) {
+            # Pessimistic Locking (1) - Handle Race Conditions
+            $order = Order::where('id', $orderId)
+                ->where('user_id', auth()->id())
+                ->lockForUpdate()
+                ->first();
+
+            if (!$order) {
+                return $this->error('Order not found', 404);
+            }
+
+            if ($order->status !== 'pending') {
+                return $this->error('This order cannot be edited');
+            }
+
             $orderItem = $order->items()
                 ->where('product_id', $productId)
                 ->first();
@@ -161,6 +242,7 @@ class OrderService
                 return $this->error('Product not found in this order', 404);
             }
 
+            # Pessimistic Locking (1) - Handle Race Conditions
             $product = Product::lockForUpdate()->find($productId);
 
             if (!$product) {
@@ -168,9 +250,15 @@ class OrderService
             }
 
             if ($quantity === 0) {
+
                 $product->increment('quantity', $orderItem->quantity);
                 $orderItem->delete();
+
                 $this->recalculateOrderTotal($order);
+
+                # Cache Invalidation (part of 6)
+                Cache::forget("product_{$productId}");
+                Cache::forget("order_{$orderId}");  
 
                 return $order->fresh()->load('items.product');
             }
@@ -190,20 +278,25 @@ class OrderService
 
             $this->recalculateOrderTotal($order);
 
+            # cache Invalidation (part of 6)
+            Cache::forget("product_{$productId}");
+            Cache::forget("order_{$orderId}");
+
             return $order->fresh()->load('items.product');
         });
     }
 
-    # Extra DB query inside Transaction
-    # Better: calculate total directly from $preparedItems in memory
-    # to avoid additional SELECT while locks are held
-    private function recalculateOrderTotal(Order $order): void
+    private function recalculateOrderTotalFromItems(Order $order, $items): void
     {
-        $totalPrice = $order->items()
-            ->selectRaw('SUM(quantity * price) as total')
-            ->value('total') ?? 0;
+        $totalPrice = 0;
 
-        $order->update(['total_price' => $totalPrice]);
+        foreach ($items as $item) {
+            $totalPrice += $item->quantity * $item->price;
+        }
+
+        $order->update([
+            'total_price' => $totalPrice
+        ]);
     }
 
     private function error(string $message, int $status = 400): array

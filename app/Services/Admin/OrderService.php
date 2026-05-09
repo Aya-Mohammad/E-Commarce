@@ -10,81 +10,66 @@ use Illuminate\Support\Facades\Log;
 
 class OrderService
 {
-    # we have (Race Condition) - status check happens OUTSIDE Transaction
     # Two admin requests can pass the status check simultaneously
     # Fix: move order fetch + status check INSIDE Transaction with lockForUpdate()
     public function handleOrder(int $orderId, string $action): array
     {
-        $order = Order::find($orderId);
+        return DB::transaction(function () use ($orderId, $action) {
 
-        if (!$order) {
-            return ['error' => 'Order not found', 'status' => 404];
-        }
+            $order = Order::lockForUpdate()->find($orderId); // ← داخل Transaction مع Lock
 
-        if ($order->status !== 'pending') {
-            return ['error' => 'Cannot edit this order', 'status' => 400];
-        }
+            if (!$order) {
+                return ['error' => 'Order not found', 'status' => 404];
+            }
 
-        if ($action === 'approve') {
-            return $this->approveOrder($order);
-        }
+            if ($order->status !== 'pending') {   // ← داخل Transaction
+                return ['error' => 'Cannot edit this order', 'status' => 400];
+            }
 
-        return $this->rejectOrder($order);
+            if ($action === 'approve') {
+                return $this->approveOrder($order);
+            }
+
+            return $this->rejectOrder($order);
+        });
     }
 
     # Add (Async Notification - notify user when order is approved via Queue)
     # Add (Cache Invalidation - invalidate order cache after status change)
-    # Risk: no lockForUpdate() on order before update - Race Condition with rejectOrder()
     private function approveOrder(Order $order): array
     {
-        DB::beginTransaction();
+        $order->update(['status' => 'approved']);
 
-        try {
-            $order->update(['status' => 'approved']);
-
-            DB::commit();
-
-            return ['data' => $order->load('items.product', 'user')];
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Error approving order: ' . $e->getMessage());
-            throw $e;
-        }
+        return ['data' => $order->load('items.product', 'user')];
     }
 
-    # we have (Race Condition) - uses Pessimistic Locking on Product 
-    # but NO lockForUpdate() on Order itself before status update
     # Add (Async Notification - notify user when order is rejected via Queue)
     # Add (Cache Invalidation - invalidate order cache after status change)
     # Add (Batch Processing - product quantity restore done one by one in foreach)
     # Better: use single batch update instead of loop
     private function rejectOrder(Order $order): array
     {
-        DB::beginTransaction();
+        $orderItems = OrderItem::where('order_id', $order->id)->get();
 
-        try {
-            $orderItems = OrderItem::where('order_id', $order->id)->get();
+        $productIds = $orderItems->pluck('product_id')->sort()->values();
 
-            foreach ($orderItems as $item) {
-                $product = Product::lockForUpdate()->find($item->product_id);
+        $products = Product::whereIn('id', $productIds)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
 
-                if ($product) {
-                    $product->increment('quantity', $item->quantity);
-                }
+        foreach ($orderItems as $item) {
+            $product = $products->get($item->product_id);
+
+            if ($product) {
+                $product->increment('quantity', $item->quantity);
             }
-
-            $order->update(['status' => 'rejected']);
-
-            DB::commit();
-
-            return ['data' => $order->load('items.product', 'user')];
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Error rejecting order: ' . $e->getMessage());
-            throw $e;
         }
+
+        $order->update(['status' => 'rejected']);
+
+        return ['data' => $order->load('items.product', 'user')];
     }
 
     # Add (Caching (Redis) - filtered order lists can be cached per status)

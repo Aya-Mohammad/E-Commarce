@@ -23,9 +23,12 @@ class StoreService
     # Risk: Orphan Files - images stored inside Transaction, if Transaction fails
     # DB rolls back but files remain on disk
     # Fix: store images AFTER DB commit, not inside Transaction
-    # Risk: no max limit on number of images per store (Capacity Control missing)
     public function createStore(array $data, array $images = []): Store
     {
+        if (count($images) > 5) {
+            throw new \Exception('Maximum 5 images allowed per product');
+        }
+
         DB::beginTransaction();
 
         try {
@@ -65,11 +68,13 @@ class StoreService
     # Add (Cache Invalidation - invalidate store cache after update)
     # Risk: Orphan Files - same problem as createStore()
     # Risk: Storage Leak - old images not deleted when new ones uploaded
-    # Fix: delete old images from disk before storing new ones
-    # Risk: no max limit on number of images (Capacity Control missing)
     public function updateStore(int $id, array $data, array $images = []): Store
     {
         $store = Store::findOrFail($id);
+
+        if (count($images) > 5) {
+        throw new \Exception('Maximum 5 images allowed per product');
+    }
 
         DB::beginTransaction();
 

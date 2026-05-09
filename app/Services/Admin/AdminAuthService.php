@@ -12,15 +12,24 @@ use Illuminate\Support\Str;
 
 class AdminAuthService
 {
-    # Add (Rate Limiting - no brute force protection for admin panel)
     # Critical: admin login with no rate limit is a serious security risk
     # Add (Async Notification - notify admin on new login (security alert))
     # Missing: no logging of admin login attempts (IP, time, device)
     public function login(array $data): ?array
     {
+        $key = 'admin_login_' . request()->ip();
+
+        if (RateLimiter::tooManyAttempts($key, 3)) {
+            $seconds = RateLimiter::availableIn($key);
+            return ['error' => "Too many attempts. Try again in {$seconds}s", 'status' => 429];
+        }
+
         if (!$token = Auth::guard('admin')->attempt($data)) {
+            RateLimiter::hit($key, 300);
             return null;
         }
+
+        RateLimiter::clear($key);
 
         return [
             'token' => $token,

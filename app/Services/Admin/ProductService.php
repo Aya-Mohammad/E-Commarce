@@ -20,12 +20,13 @@ class ProductService
 
     # Add (Async Queue - image processing should be done in background Job)
     # Add (Cache Invalidation - invalidate product list cache after creation)
-    # Risk: images are stored one by one inside Transaction - if storage fails
     # mid-loop, DB rolls back but already-stored files remain on disk (orphan files)
-    # Fix: store images AFTER DB commit, not inside Transaction
-    # Risk: no max limit on number of images per product (Capacity Control missing)
     public function createProduct(array $data, array $images = []): Product
     {
+        if (count($images) > 5) {
+            throw new \Exception('Maximum 5 images allowed per product');
+        }
+
         DB::beginTransaction();
 
         try {
@@ -66,11 +67,13 @@ class ProductService
     # Add (Cache Invalidation - invalidate product cache after update)
     # Risk: same orphan files problem - storage inside Transaction
     # Risk: old images are NOT deleted when new ones are uploaded (storage leak)
-    # Fix: delete old images from disk before storing new ones
-    # Risk: no max limit on number of images (Capacity Control missing)
     public function updateProduct(int $id, array $data, array $images = []): Product
     {
         $product = Product::findOrFail($id);
+
+        if (count($images) > 5) {
+            throw new \Exception('Maximum 5 images allowed per product');
+        }
 
         DB::beginTransaction();
 

@@ -5,68 +5,117 @@ namespace App\Services\System;
 use App\Models\Cart;
 use App\Models\Product;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 
 class CartService
 {
-    # we have (Race Condition) - we use (Transaction + Pessimistic Locking)
-    # Better use (Optimistic Locking)
-    # Add (Cache Invalidation for product quantity)
-    # Add (Capacity Control - max quantity per product per user)
+
+    private const CART_CACHE_KEY = 'cart:user:%d:page:%d';
+
+    private function cartCacheKey(int $userId, int $page = 1): string
+    {
+        return sprintf(self::CART_CACHE_KEY, $userId, $page);
+    }
+
     public function add(array $data)
     {
-        return DB::transaction(function () use ($data) {
-            $product = Product::lockForUpdate()->find($data['product_id']);
+        $userId = auth()->id();
+        $maxPerProduct = 100;
 
-            if (!$product) {
-                return ['error' => 'Product not found', 'status' => 404];
-            }
+        // (8) Transaction Integrity / ACID
+        return DB::transaction(function () use ($data, $userId, $maxPerProduct) {
 
-            $existingCart = Cart::where('user_id', auth()->id())
-                ->where('product_id', $data['product_id'])
+            // (7) Concurrency Control - Pessimistic Locking
+            $product = Product::where('id', $data['product_id'])
+                ->lockForUpdate()
                 ->first();
 
-            $targetQuantity = ($existingCart?->quantity ?? 0) + $data['quantity'];
-
-            if ($product->quantity < $targetQuantity) {
-                return ['error' => 'Not enough stock', 'status' => 422];
+            if (!$product) {
+                return [
+                    'error' => 'Product not found',
+                    'status' => 404
+                ];
             }
 
-            return Cart::updateOrCreate(
+            // (1) Race Condition Prevention + Thread Safety
+            $cartItem = Cart::where('user_id', $userId)
+                ->where('product_id', $data['product_id'])
+                ->lockForUpdate()
+                ->first();
+
+            $currentQty = $cartItem?->quantity ?? 0;
+            $newQty = $currentQty + $data['quantity'];
+
+            // (2) Resource Management & Capacity Control
+            if ($newQty > $maxPerProduct) {
+                return [
+                    'error' => "Maximum allowed quantity per product is {$maxPerProduct}",
+                    'status' => 422
+                ];
+            }
+
+            if ($product->quantity < $newQty) {
+                return [
+                    'error' => 'Not enough stock',
+                    'status' => 422
+                ];
+            }
+
+            $result = Cart::updateOrCreate(
                 [
-                    'user_id'    => auth()->id(),
+                    'user_id' => $userId,
                     'product_id' => $data['product_id'],
                 ],
                 [
-                    'quantity' => $targetQuantity,
+                    'quantity' => $newQty,
                 ]
             );
+
+            // (6) Distributed Caching + Cache Invalidation
+            Cache::forget("product:{$product->id}");
+            Cache::forget("product_stock:{$product->id}");
+
+            // Unified cart cache invalidation
+            Cache::forget($this->cartCacheKey($userId));
+
+            return $result;
         });
     }
 
-    # No Transaction - safe here (single delete, no stock changes)
-    # Add (Cache Invalidation for cart) 
     public function remove($id)
     {
-        $cart = Cart::where('id', $id)
-            ->where('user_id', auth()->id())
-            ->first();
+        $userId = auth()->id();
 
-        if (!$cart) {
-            return ['error' => 'Cart item not found', 'status' => 404];
-        }
+        // (8) Transaction Integrity (ACID)
+        return DB::transaction(function () use ($id, $userId) {
 
-        $cart->delete();
+            // (7) Concurrency Control - Pessimistic Locking
+            $cart = Cart::where('id', $id)
+                ->where('user_id', $userId)
+                ->lockForUpdate()
+                ->first();
 
-        return true;
+            // (1) Data Integrity
+            if (!$cart) {
+                return [
+                    'error' => 'Cart item not found',
+                    'status' => 404
+                ];
+            }
+
+            $cart->delete();
+
+            // (6) Distributed Caching Strategy
+            Cache::forget($this->cartCacheKey($userId));
+
+            return true;
+        });
     }
-
-    # we have (Race Condition) - we use (Transaction + Pessimistic Locking)
-    # Better use (Optimistic Locking)
-    # Add (Validation - quantity must be > 0)
-    # Add (Cache Invalidation)
     public function updateQuantity($id, $quantity)
     {
+        // (8) Transaction Integrity / ACID
         return DB::transaction(function () use ($id, $quantity) {
+
             $cart = Cart::where('id', $id)
                 ->where('user_id', auth()->id())
                 ->first();
@@ -75,60 +124,82 @@ class CartService
                 return ['error' => 'Cart item not found', 'status' => 404];
             }
 
-            $product = Product::lockForUpdate()->find($cart->product_id);
+            // (7) Concurrency Control (Pessimistic Locking)
+            $product = Product::where('id', $cart->product_id)
+                ->lockForUpdate()
+                ->first();
 
             if (!$product) {
                 return ['error' => 'Product not found', 'status' => 404];
             }
 
+            // (1) Data Integrity & Validation
+            if ($quantity <= 0) {
+                return ['error' => 'Quantity must be greater than 0', 'status' => 422];
+            }
+
+            // (1) Concurrent Access & Data Integrity
             if ($product->quantity < $quantity) {
                 return ['error' => 'Not enough stock', 'status' => 422];
             }
 
-            $cart->update(['quantity' => $quantity]);
+            $cart->update([
+                'quantity' => $quantity
+            ]);
+
+            // NFR (6) Distributed Caching Strategy (Cache Invalidation)
+            Cache::forget("cart_user_" . auth()->id());
+            Cache::forget("product_" . $product->id);
 
             return $cart->fresh('product');
         });
     }
 
-    # Add (Pagination - large carts will load all items at once)
-    # Add (Caching (Redis) - cart data changes rarely, good candidate for Cache)
     public function show()
     {
-        $cartItems = Cart::where('user_id', auth()->id())
-            ->with('product')
-            ->get();
+        $userId = auth()->id();
+        $perPage = 10;
+        $page = request()->get('page', 1);
 
-        return $cartItems->map(function ($item) {
-            if (!$item->product) {
+        // (6) Distributed Caching (Redis)
+        $cacheKey = "cart:user:{$userId}:page:{$page}";
+
+        $cart = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($userId, $perPage) {
+
+            return Cart::where('user_id', $userId)
+                ->with('product')
+
+                // (1) Concurrent Access & Data Integrity
+                // (2) Resource Management & Capacity Control
+                ->paginate($perPage);
+        });
+
+        return [
+            'data' => collect($cart->items())->map(function ($item) {
+
                 return [
                     'id'           => $item->id,
                     'product_id'   => $item->product_id,
-                    'product_name' => 'Product unavailable',
+                    'product_name' => $item->product->name ?? 'Product unavailable',
                     'quantity'     => $item->quantity,
-                    'price'        => null,
+                    'price'        => $item->product->price ?? null,
                 ];
-            }
+            }),
 
-            return [
-                'id'           => $item->id,
-                'product_id'   => $item->product_id,
-                'product_name' => $item->product->name,
-                'quantity'     => $item->quantity,
-                'price'        => $item->product->price,
-            ];
-        });
+            'pagination' => [
+                'current_page' => $cart->currentPage(),
+                'last_page'    => $cart->lastPage(),
+                'total'        => $cart->total(),
+            ]
+        ];
     }
 
-    # we have (Race Condition) - we use (Transaction + Pessimistic Locking)
-    # Better use (Optimistic Locking)
-    # Add (Cache Invalidation - for both cart and favourites)
-    # Risk: uses raw DB::table() for favourite - inconsistent with Eloquent pattern
     public function moveFavorite(array $data, $favoriteId)
     {
         return DB::transaction(function () use ($data, $favoriteId) {
-            $favorite = DB::table('favourite_of_products')
-                ->where('id', $favoriteId)
+
+            // (7) Concurrency Control - Pessimistic Locking
+            $favorite = FavoriteOfProduct::where('id', $favoriteId)
                 ->where('user_id', auth()->id())
                 ->first();
 
@@ -136,33 +207,48 @@ class CartService
                 return ['error' => 'Favorite item not found', 'status' => 404];
             }
 
-            $product = Product::lockForUpdate()->find($favorite->product_id);
+            $product = Product::where('id', $favorite->product_id)
+                ->lockForUpdate()
+                ->first();
 
             if (!$product) {
                 return ['error' => 'Product not found', 'status' => 404];
+            }
+
+            // (1) Data Integrity 
+            $quantity = (int) $data['quantity'];
+
+            if ($quantity <= 0) {
+                return ['error' => 'Invalid quantity', 'status' => 422];
             }
 
             $cartItem = Cart::where('user_id', $favorite->user_id)
                 ->where('product_id', $favorite->product_id)
                 ->first();
 
-            $targetQuantity = ($cartItem?->quantity ?? 0) + $data['quantity'];
+            $targetQuantity = ($cartItem?->quantity ?? 0) + $quantity;
 
             if ($product->quantity < $targetQuantity) {
                 return ['error' => 'Not enough stock', 'status' => 422];
             }
 
+            // (8) Transaction Integrity (ACID)
             if ($cartItem) {
                 $cartItem->update(['quantity' => $targetQuantity]);
             } else {
                 $cartItem = Cart::create([
                     'user_id'    => $favorite->user_id,
                     'product_id' => $favorite->product_id,
-                    'quantity'   => $data['quantity'],
+                    'quantity'   => $quantity,
                 ]);
             }
 
-            DB::table('favourite_of_products')->where('id', $favoriteId)->delete();
+            $favorite->delete();
+
+            // (6) Distributed Caching Strategy
+            Cache::forget("cart_user_" . $favorite->user_id);
+            Cache::forget("favorites_user_" . $favorite->user_id);
+            Cache::forget("product_" . $favorite->product_id);
 
             return $cartItem;
         });

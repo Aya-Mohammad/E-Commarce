@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use JWTAuth;
+use Illuminate\Support\Facades\RateLimiter;
 
 class AuthService
 {
@@ -22,15 +23,24 @@ class AuthService
         return $user ? 'existing_user' : 'new_user';
     }
 
-    # Add (Rate Limiting - no protection against brute force attacks)
     # Add (Async Notification - notify user on new login via Queue)
     # Missing: no logging of login attempts (IP, device, time)
     # Missing: no handling of fcm_token update on each login
     public function login($credentials)
     {
+        $key = 'login_' . request()->ip();
+
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            $seconds = RateLimiter::availableIn($key);
+            return ['error' => "Too many attempts. Try again in {$seconds}s", 'status' => 429];
+        }
+
         if (!$token = JWTAuth::attempt($credentials)) {
+            RateLimiter::hit($key, 60); 
             return null;
         }
+
+        RateLimiter::clear($key); 
 
         return [
             'token' => $token,
