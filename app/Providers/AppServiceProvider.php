@@ -15,17 +15,11 @@ use Illuminate\Http\Request;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
         //
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
         Relation::MorphMap([
@@ -41,7 +35,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('auth', function (Request $request) {
-            return Limit::perMinute(5)->by($request->ip());
+            return Limit::perMinute(1000)->by($request->ip());
         });
 
         RateLimiter::for('api', function (Request $request) {

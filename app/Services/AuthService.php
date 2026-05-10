@@ -10,12 +10,10 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use JWTAuth;
 use Illuminate\Support\Facades\RateLimiter;
+use App\Jobs\ProcessUserImage;
 
 class AuthService
 {
-    # Add (Caching (Redis) - called before every login to check if user exists)
-    # high frequency call, good Cache candidate with short TTL
-    # Risk: Phone enumeration vulnerability - attacker can check if any phone is registered
     public function checkUser($phone)
     {
         $user = User::where('phone', $phone)->first();
@@ -23,94 +21,228 @@ class AuthService
         return $user ? 'existing_user' : 'new_user';
     }
 
-    # Add (Async Notification - notify user on new login via Queue)
-    # Missing: no logging of login attempts (IP, device, time)
-    # Missing: no handling of fcm_token update on each login
-    public function login($credentials)
-    {
-        $key = 'login_' . request()->ip();
+// _____________________________________________________________________________________________________
 
+    // public function login($credentials, $fcmToken = null)
+    // {
+    //     $ip = request()->ip();
+    //     $key = 'login_attempts_' . $ip;
+
+    //     // إذا تجاوز المحاولات، اقطع الطلب فوراً برمز 429
+    //     if (RateLimiter::tooManyAttempts($key, 5)) {
+    //         abort(429, 'Too many attempts.');
+    //     }
+
+    //     // محاولة الدخول
+    //     if (!$token = JWTAuth::attempt($credentials)) {
+    //         RateLimiter::hit($key, 60);
+            
+    //         // إذا البيانات خطأ، اقطع الطلب برمز 401
+    //         abort(401, 'Invalid credentials.');
+    //     }
+
+    //     RateLimiter::clear($key);
+
+    //     return [
+    //         'token' => $token,
+    //         'user'  => auth()->user(),
+    //     ];
+    // }
+
+    // Test By Elias
+    public function login($credentials, $fcmToken = null)
+    {
+        $ip = request()->ip();
+        $key = 'login_attempts_' . $ip;
+
+        // --- المرحلة 1: Rate Limiting (لا تزال موجودة للحماية) ---
         if (RateLimiter::tooManyAttempts($key, 5)) {
-            $seconds = RateLimiter::availableIn($key);
-            return ['error' => "Too many attempts. Try again in {$seconds}s", 'status' => 429];
+            abort(429, 'Too many attempts. Protected by Rate Limiter.');
         }
+
+        // --- المرحلة 2: Distributed Caching (Redis) ---
+        $phone = $credentials['phone'];
+        $cacheKey = "user_auth_data_{$phone}";
+
+        $user = Cache::remember($cacheKey, 3600, function () use ($phone) {
+            return \App\Models\User::where('phone', $phone)->first();
+        });
 
         if (!$token = JWTAuth::attempt($credentials)) {
-            RateLimiter::hit($key, 60); 
-            return null;
+            RateLimiter::hit($key, 60);
+            abort(401, 'Invalid credentials.');
         }
 
-        RateLimiter::clear($key); 
+        RateLimiter::clear($key);
+
+        if ($fcmToken && auth()->user()) {
+            auth()->user()->update(['fcm_token' => $fcmToken]);
+        }
 
         return [
             'token' => $token,
-            'user'  => new UserResource(auth()->user()),
+            'user'  => $user, 
         ];
     }
 
-    # Add (Cache Invalidation - if user list is cached anywhere)
-    # Add (Async Queue - image processing should be done in background Job)
-    # Risk: Orphan Files - image stored inside Transaction
-    # if Transaction fails, DB rolls back but file remains on disk
-    # Fix: store image AFTER DB commit
-    # Risk: phone uniqueness not enforced here - relies only on DB constraint
-    # Missing: no welcome notification after registration
+    # Round 3
+    // public function login($credentials, $fcmToken = null)
+    // {
+    //     $ip = request()->ip();
+    //     $key = 'login_attempts_' . $ip;
+
+    //     // --- المرحلة 1: Rate Limiting ---
+    //     if (RateLimiter::tooManyAttempts($key, 5)) {
+    //         abort(429, 'Too many attempts.');
+    //     }
+
+    //     // --- المرحلة 2: Redis Caching ---
+    //     $phone = $credentials['phone'];
+    //     $cacheKey = "user_auth_data_{$phone}";
+        
+    //     $user = Cache::remember($cacheKey, 3600, function () use ($phone) {
+    //         return \App\Models\User::where('phone', $phone)->first();
+    //     });
+
+    //     if (!$token = JWTAuth::attempt($credentials)) {
+    //         RateLimiter::hit($key, 60);
+    //         abort(401, 'Invalid credentials.');
+    //     }
+
+    //     RateLimiter::clear($key);
+
+    //     // --- المرحلة 3: Async Jobs (العمليات الخلفية) ---
+    //     \App\Jobs\SendLoginNotification::dispatch($user, request()->userAgent());
+
+    //     if ($fcmToken) {
+    //         auth()->user()->update(['fcm_token' => $fcmToken]);
+    //     }
+
+    //     return [
+    //         'token' => $token,
+    //         'user'  => $user,
+    //     ];
+    // }
+// _____________________________________________________________________________________
+    // public function register($data)
+    // {
+    //     $filePath = null;
+
+    //     try {
+    //         $user = DB::transaction(function () use ($data) {
+
+    //         $user = User::create([
+    //             'first_name' => $data['first_name'],
+    //             'last_name'  => $data['last_name'],
+    //             'phone'      => $data['phone'],
+    //             'password'   => Hash::make($data['password']),
+    //             'location'   => $data['location'],
+    //             'fcm_token'  => $data['fcm_token'] ?? null,
+    //         ]);
+
+    //         return $user;
+    //     });
+
+    //         if (isset($data['image_path'])) {
+
+    //         $file = $data['image_path'];
+
+    //         $mime = $file->getMimeType();
+
+    //         if (!in_array($mime, ['image/jpeg', 'image/png'])) {
+    //             throw new \Exception('Invalid file type.');
+    //         }
+
+
+    //         $fileName = Str::uuid() . '.' . strtolower($file->getClientOriginalExtension());
+
+    //         $filePath = $file->storeAs(
+    //             "uploads/users/{$user->phone}",
+    //             $fileName,
+    //             'private'
+    //         );
+
+    //         $user->image()->create([
+    //             'image_path' => $filePath,
+    //         ]);
+    //     }
+
+    //     $token = JWTAuth::fromUser($user);
+
+    //     $user->load('image');
+
+    //     return [
+    //         'token'      => $token,
+    //         'user'       => new UserResource($user),
+    //         'image_path' => $filePath,
+    //     ];
+
+    //     } catch (\Throwable $e) {
+
+    //         if ($filePath) {
+    //             Storage::disk('private')->delete($filePath);
+    //         }
+
+    //         throw $e;
+    //     }
+    // }
+
+    // public function register($data)
+    // {
+    //     try {
+    //         $user = User::create([
+    //             'first_name' => $data['first_name'],
+    //             'last_name'  => $data['last_name'],
+    //             'phone'      => $data['phone'],
+    //             'password'   => Hash::make($data['password']),
+    //             'location'   => $data['location'],
+    //             'fcm_token'  => $data['fcm_token'] ?? null,
+    //         ]);
+
+    //         if (isset($data['image_path'])) {
+    //             ProcessUserImage::dispatch($user, $data['image_path']);
+    //         }
+
+    //         $token = JWTAuth::fromUser($user);
+
+    //         return [
+    //             'token' => $token,
+    //             'user'  => new UserResource($user),
+    //         ];
+
+    //     } catch (\Throwable $e) {
+    //         throw $e;
+    //     }
+    // }
+
     public function register($data)
     {
-        DB::beginTransaction();
+        $hashedPassword = Hash::make($data['password']);
 
-        try {
-            $user = User::create([
-                'first_name' => $data['first_name'],
-                'last_name'  => $data['last_name'],
-                'phone'      => $data['phone'],
-                'password'   => Hash::make($data['password']),
-                'location'   => $data['location'],
-                'fcm_token'  => $data['fcm_token'] ?? null,
-            ]);
+        $user = User::create([
+            'first_name' => $data['first_name'],
+            'last_name'  => $data['last_name'],
+            'phone'      => $data['phone'],
+            'password'   => $hashedPassword,
+            'location'   => $data['location'],
+            'fcm_token'  => $data['fcm_token'] ?? null,
+        ]);
 
-            $url = null;
-
-            if (isset($data['image_path'])) {
-                $file = $data['image_path'];
-
-                $realMimeType = $file->getMimeType();
-                if (!in_array($realMimeType, ['image/jpeg', 'image/png'])) {
-                    throw new \Exception('Invalid file type.');
-                }
-
-                $extension = $file->getClientOriginalExtension();
-                $fileName  = Str::uuid() . '.' . strtolower($extension);
-
-                $path = $file->storeAs("uploads/users/{$data['phone']}", $fileName, 'private');
-                $url  = Storage::disk('private')->url($path);
-
-                $user->image()->create([
-                    'image_path' => $path, 
-                ]);
-            }
-
-            $token = JWTAuth::fromUser($user);
-
-            DB::commit();
-
-            $user->load('image');
-
-            return [
-                'token'      => $token,
-                'user'       => new UserResource($user),
-                'image_path' => $url,
-            ];
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
+        if (isset($data['image_path']) && $data['image_path'] instanceof \Illuminate\Http\UploadedFile) {
+            $tempPath = $data['image_path']->store("uploads/users/{$user->phone}", 'public');
+            ProcessUserImage::dispatch($user->id, $tempPath)->onQueue('images');
         }
+
+        $token = JWTAuth::fromUser($user);
+
+        return [
+            'token' => $token,
+            'user'  => new UserResource($user),
+        ];
     }
 
-    # Add (Cache Invalidation - clear any user-specific cached data on logout)
-    # Missing: no fcm_token clearing on logout (user will still receive notifications)
-    # Missing: no logging of logout event
+#____________________________________________________________________________________________
+    
     public function logout(): bool
     {
         try {

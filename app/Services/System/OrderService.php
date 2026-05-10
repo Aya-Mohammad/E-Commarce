@@ -35,14 +35,18 @@ class OrderService
         $userId = auth()->id();
 
         /**
+         * =========================
          * Capacity Control
-         * Maximum different products allowed in cart
+         * =========================
          */
         $maxCartItems = 50;
 
+        // $cartItemsCount = Cache::remember("cart_count:{$userId}", 300, function () use ($userId) {
+        //     return Cart::where('user_id', $userId)->count();
+        // });
+
         $cartItemsCount = Cart::where('user_id', $userId)->count();
 
-        # Capacity Control (2)
         if ($cartItemsCount > $maxCartItems) {
             return $this->error(
                 "Cart cannot exceed {$maxCartItems} different products",
@@ -50,8 +54,12 @@ class OrderService
             );
         }
 
-        # Distributed Lock (1)
-        $lock = Cache::lock("place_order_{$userId}", 10);
+        /**
+         * =========================
+         * Distributed Lock (Redis)
+         * =========================
+         */
+        // $lock = Cache::lock("place_order:{$userId}", 10);
 
         if (!$lock->get()) {
             return $this->error('Another order is being processed', 429);
@@ -61,19 +69,32 @@ class OrderService
 
             return DB::transaction(function () use ($userId) {
 
+                /**
+                 * =========================
+                 * Cart (cached read)
+                 * =========================
+                 */
+                // $cartItems = Cache::remember("cart:{$userId}", 120, function () use ($userId) {
+                //     return Cart::where('user_id', $userId)
+                //         ->with('product')
+                //         ->get();
+                // });
+
                 $cartItems = Cart::where('user_id', $userId)
-                    ->with('product')
-                    ->get();
+                ->with('product')
+                ->get();
 
                 if ($cartItems->isEmpty()) {
-                    return $this->error('Cart is empty');
+                    return $this->error('Cart is empty', 422);
                 }
 
-                $productIds = $cartItems->pluck('product_id')
-                    ->sort()
-                    ->values();
+                $productIds = $cartItems->pluck('product_id')->unique()->values();
 
-                # Pessimistic Locking (1) - Handle Race Conditions
+                /**
+                 * =========================
+                 * Lock products (critical section)
+                 * =========================
+                 */
                 $products = Product::whereIn('id', $productIds)
                     ->orderBy('id')
                     ->lockForUpdate()
@@ -81,7 +102,7 @@ class OrderService
                     ->keyBy('id');
 
                 $preparedItems = [];
-                $totalPrice    = 0;
+                $totalPrice = 0;
 
                 foreach ($cartItems as $cartItem) {
 
@@ -98,25 +119,34 @@ class OrderService
                         );
                     }
 
-                    $unitPrice = (float) $product->price;
+                    $price = (float) $product->price;
 
                     $preparedItems[] = [
                         'product'    => $product,
                         'product_id' => $product->id,
                         'quantity'   => $cartItem->quantity,
-                        'price'      => $unitPrice,
+                        'price'      => $price,
                     ];
 
-                    $totalPrice += $unitPrice * $cartItem->quantity;
+                    $totalPrice += $price * $cartItem->quantity;
                 }
 
+                /**
+                 * =========================
+                 * Create Order
+                 * =========================
+                 */
                 $order = Order::create([
                     'user_id'     => $userId,
                     'total_price' => $totalPrice,
                     'status'      => 'pending',
                 ]);
 
-                # Batch Insert (4)
+                /**
+                 * =========================
+                 * Batch insert + stock update
+                 * =========================
+                 */
                 $orderItems = [];
 
                 foreach ($preparedItems as $item) {
@@ -130,18 +160,27 @@ class OrderService
                         'updated_at' => now(),
                     ];
 
-                    $item['product']->decrement(
-                        'quantity',
-                        $item['quantity']
-                    );
+                    $item['product']->decrement('quantity', $item['quantity']);
                 }
 
                 OrderItem::insert($orderItems);
 
+                /**
+                 * =========================
+                 * Clear cart
+                 * =========================
+                 */
                 Cart::where('user_id', $userId)->delete();
 
-                # Clear User Orders Cache
-                Cache::tags(['user_orders', $userId])->flush();
+                /**
+                 * =========================
+                 * Clear only relevant cache (NO FLUSH)
+                 * =========================
+                 */
+                // Cache::forget("cart:{$userId}");
+                // Cache::forget("cart_count:{$userId}");
+                // Cache::forget("orders:{$userId}");
+                // Cache::forget("user_orders:{$userId}");
 
                 return $order->load('items.product');
             });

@@ -12,53 +12,42 @@ class TestDataSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. User ثابت للاختبار
         $user = User::firstOrCreate(
             ['phone' => '0999999999'],
             [
                 'first_name' => 'Test',
-                'last_name' => 'User',
-                'password' => Hash::make('password'),
-                'location' => 'Test City',
+                'last_name'  => 'User',
+                'password'   => Hash::make('password'),
+                'location'   => 'Test City',
             ]
         );
 
-        // 2. Products (بدون factory مشاكل)
-        Product::query()->insert([
-        [
-            'name' => 'Product 1',
-            'description' => 'Test product 1',
-            'price' => 10,
-            'quantity' => 50,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ],
-        [
-            'name' => 'Product 2',
-            'description' => 'Test product 2',
-            'price' => 20,
-            'quantity' => 50,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ],
-        [
-            'name' => 'Product 3',
-            'description' => 'Test product 3',
-            'price' => 30,
-            'quantity' => 50,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ],
-    ]);
+        Cart::where('user_id', $user->id)->delete();
+        
+        \App\Models\OrderItem::whereIn(
+            'order_id',
+            \App\Models\Order::where('user_id', $user->id)->pluck('id')
+        )->delete();
+        
+        \App\Models\Order::where('user_id', $user->id)->delete();
+
+        Product::query()->update(['quantity' => 1000]);
+
+        if (Product::count() === 0) {
+            Product::insert([
+                ['name' => 'Product 1', 'description' => 'Test 1', 'price' => 10, 'quantity' => 1000, 'created_at' => now(), 'updated_at' => now()],
+                ['name' => 'Product 2', 'description' => 'Test 2', 'price' => 20, 'quantity' => 1000, 'created_at' => now(), 'updated_at' => now()],
+                ['name' => 'Product 3', 'description' => 'Test 3', 'price' => 30, 'quantity' => 1000, 'created_at' => now(), 'updated_at' => now()],
+            ]);
+        }
 
         $products = Product::take(3)->get();
 
-        // 3. Cart جاهز للـ Order
         foreach ($products as $product) {
             Cart::create([
-                'user_id' => $user->id,
+                'user_id'    => $user->id,
                 'product_id' => $product->id,
-                'quantity' => 2
+                'quantity'   => 2,
             ]);
         }
     }
