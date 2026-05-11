@@ -7,10 +7,12 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "intervention/image": "^4.0",
         "laravel/framework": "^11.31",
         "laravel/octane": "^2.17",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.9",
+        "predis/predis": "^3.4",
         "tymon/jwt-auth": "^2.1"
     },
     "require-dev": {
