@@ -4,12 +4,11 @@ namespace App\Services\System;
 
 use App\Models\Cart;
 use App\Models\Product;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class CartService
 {
-
     private const CART_CACHE_KEY = 'cart:user:%d:page:%d';
 
     private function cartCacheKey(int $userId, int $page = 1): string
@@ -30,10 +29,10 @@ class CartService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$product) {
+            if (! $product) {
                 return [
                     'error' => 'Product not found',
-                    'status' => 404
+                    'status' => 404,
                 ];
             }
 
@@ -50,14 +49,14 @@ class CartService
             if ($newQty > $maxPerProduct) {
                 return [
                     'error' => "Maximum allowed quantity per product is {$maxPerProduct}",
-                    'status' => 422
+                    'status' => 422,
                 ];
             }
 
             if ($product->quantity < $newQty) {
                 return [
                     'error' => 'Not enough stock',
-                    'status' => 422
+                    'status' => 422,
                 ];
             }
 
@@ -96,10 +95,10 @@ class CartService
                 ->first();
 
             // (1) Data Integrity
-            if (!$cart) {
+            if (! $cart) {
                 return [
                     'error' => 'Cart item not found',
-                    'status' => 404
+                    'status' => 404,
                 ];
             }
 
@@ -111,6 +110,7 @@ class CartService
             return true;
         });
     }
+
     public function updateQuantity($id, $quantity)
     {
         // (8) Transaction Integrity / ACID
@@ -120,7 +120,7 @@ class CartService
                 ->where('user_id', auth()->id())
                 ->first();
 
-            if (!$cart) {
+            if (! $cart) {
                 return ['error' => 'Cart item not found', 'status' => 404];
             }
 
@@ -129,7 +129,7 @@ class CartService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$product) {
+            if (! $product) {
                 return ['error' => 'Product not found', 'status' => 404];
             }
 
@@ -144,12 +144,12 @@ class CartService
             }
 
             $cart->update([
-                'quantity' => $quantity
+                'quantity' => $quantity,
             ]);
 
             // NFR (6) Distributed Caching Strategy (Cache Invalidation)
-            Cache::forget("cart_user_" . auth()->id());
-            Cache::forget("product_" . $product->id);
+            Cache::forget('cart_user_'.auth()->id());
+            Cache::forget('product_'.$product->id);
 
             return $cart->fresh('product');
         });
@@ -178,19 +178,19 @@ class CartService
             'data' => collect($cart->items())->map(function ($item) {
 
                 return [
-                    'id'           => $item->id,
-                    'product_id'   => $item->product_id,
+                    'id' => $item->id,
+                    'product_id' => $item->product_id,
                     'product_name' => $item->product->name ?? 'Product unavailable',
-                    'quantity'     => $item->quantity,
-                    'price'        => $item->product->price ?? null,
+                    'quantity' => $item->quantity,
+                    'price' => $item->product->price ?? null,
                 ];
             }),
 
             'pagination' => [
                 'current_page' => $cart->currentPage(),
-                'last_page'    => $cart->lastPage(),
-                'total'        => $cart->total(),
-            ]
+                'last_page' => $cart->lastPage(),
+                'total' => $cart->total(),
+            ],
         ];
     }
 
@@ -203,7 +203,7 @@ class CartService
                 ->where('user_id', auth()->id())
                 ->first();
 
-            if (!$favorite) {
+            if (! $favorite) {
                 return ['error' => 'Favorite item not found', 'status' => 404];
             }
 
@@ -211,11 +211,11 @@ class CartService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$product) {
+            if (! $product) {
                 return ['error' => 'Product not found', 'status' => 404];
             }
 
-            // (1) Data Integrity 
+            // (1) Data Integrity
             $quantity = (int) $data['quantity'];
 
             if ($quantity <= 0) {
@@ -237,18 +237,18 @@ class CartService
                 $cartItem->update(['quantity' => $targetQuantity]);
             } else {
                 $cartItem = Cart::create([
-                    'user_id'    => $favorite->user_id,
+                    'user_id' => $favorite->user_id,
                     'product_id' => $favorite->product_id,
-                    'quantity'   => $quantity,
+                    'quantity' => $quantity,
                 ]);
             }
 
             $favorite->delete();
 
             // (6) Distributed Caching Strategy
-            Cache::forget("cart_user_" . $favorite->user_id);
-            Cache::forget("favorites_user_" . $favorite->user_id);
-            Cache::forget("product_" . $favorite->product_id);
+            Cache::forget('cart_user_'.$favorite->user_id);
+            Cache::forget('favorites_user_'.$favorite->user_id);
+            Cache::forget('product_'.$favorite->product_id);
 
             return $cartItem;
         });
