@@ -30,3 +30,12 @@ frankenphp-worker.php
 **/caddy
 frankenphp
 frankenphp-worker.php
+
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.webp
+*.bmp
+*.ico
