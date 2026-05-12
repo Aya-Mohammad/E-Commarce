@@ -20,24 +20,53 @@ class DashboardService
 # Missing: no date filtering - no way to get stats for specific period (today, this month)
 # Missing: no revenue stats - total_price sum not included
 # Missing: no top products / top stores stats
+    // public function getStats(): array
+    // {
+    //     $orderStats = Order::selectRaw('
+    //         COUNT(*) as total,
+    //         SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending,
+    //         SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as approved,
+    //         SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as rejected,
+    //         SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as delivered,
+    //         SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as cancelled
+    //     ', ['pending', 'approved', 'rejected', 'delivered', 'cancelled'])
+    //     ->first();
+
+    //     return [
+    //         'users'    => User::count(),
+    //         'orders'   => $orderStats->total,
+    //         'products' => Product::count(),
+    //         'stores'   => Store::count(),
+
+    //         'orders_status' => [
+    //             'pending'   => $orderStats->pending,
+    //             'approved'  => $orderStats->approved,
+    //             'rejected'  => $orderStats->rejected,
+    //             'delivered' => $orderStats->delivered,
+    //             'cancelled' => $orderStats->cancelled,
+    //         ],
+    //     ];
+    // }
+
     public function getStats(): array
-    {
+{
+  
+    return Cache::remember('admin_dashboard_stats', now()->addMinutes(30), function () {
+       
         $orderStats = Order::selectRaw('
             COUNT(*) as total,
-            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as approved,
-            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as rejected,
-            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as delivered,
-            SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as cancelled
-        ', ['pending', 'approved', 'rejected', 'delivered', 'cancelled'])
-        ->first();
+            SUM(CASE WHEN status = "pending" THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status = "approved" THEN 1 ELSE 0 END) as approved,
+            SUM(CASE WHEN status = "rejected" THEN 1 ELSE 0 END) as rejected,
+            SUM(CASE WHEN status = "delivered" THEN 1 ELSE 0 END) as delivered,
+            SUM(CASE WHEN status = "cancelled" THEN 1 ELSE 0 END) as cancelled
+        ')->first();
 
         return [
             'users'    => User::count(),
             'orders'   => $orderStats->total,
             'products' => Product::count(),
             'stores'   => Store::count(),
-
             'orders_status' => [
                 'pending'   => $orderStats->pending,
                 'approved'  => $orderStats->approved,
@@ -46,5 +75,6 @@ class DashboardService
                 'cancelled' => $orderStats->cancelled,
             ],
         ];
-    }
+    });
+}
 }

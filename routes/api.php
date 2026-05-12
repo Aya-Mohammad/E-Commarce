@@ -50,6 +50,7 @@ Route::middleware('jwt.auth')->group(function () {
     /*
     |---------------- Cart ----------------
     */
+    
     Route::prefix('cart')->group(function () {
         Route::post('add', [CartController::class, 'add']);
         Route::post('update-quantity/{id}', [CartController::class, 'updateQuantity']);
