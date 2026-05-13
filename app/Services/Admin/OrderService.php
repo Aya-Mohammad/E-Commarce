@@ -2,6 +2,9 @@
 
 namespace App\Services\Admin;
 
+
+
+use Illuminate\Support\Facades\Cache;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
@@ -57,6 +60,8 @@ class OrderService
     });
 }
 
+
+
     # Add (Async Notification - notify user when order is approved via Queue)
     # Add (Cache Invalidation - invalidate order cache after status change)
     private function approveOrder(Order $order): array
@@ -94,20 +99,69 @@ class OrderService
 
     //     return ['data' => $order->load('items.product', 'user')];
     // }
+ 
 
-    private function rejectOrder(Order $order): array
+    //first edit
+//     private function rejectOrder(Order $order): array
+// {
+//     $orderItems = OrderItem::where('order_id', $order->id)->get();
+
+//     foreach ($orderItems as $item) {
+      
+//         Product::where('id', $item->product_id)->lockForUpdate()->increment('quantity', $item->quantity);
+//     }
+
+//     $order->update(['status' => 'rejected']);
+
+//     return ['data' => $order->load('items.product', 'user')];
+// }
+
+
+
+
+private function rejectOrder(Order $order): array
 {
+    // 1. جلب العناصر (OrderItem)
     $orderItems = OrderItem::where('order_id', $order->id)->get();
 
+    // 2. استخراج معرفات المنتجات وترتيبها (مهم جداً لمنع الـ Deadlock تقنياً)
+    $productIds = $orderItems->pluck('product_id')->sort()->values();
+
+    // 3. قفل جميع المنتجات المطلوبة بـ "ضربة واحدة" خارج الحلقة
+    // بدلاً من استعلام لكل منتج، نقوم باستعلام واحد لكل المنتجات
+    $products = Product::whereIn('id', $productIds)
+        ->orderBy('id') // الترتيب يضمن قفل البيانات بشكل آمن دائماً
+        ->lockForUpdate()
+        ->get()
+        ->keyBy('id');
+
+    // 4. الآن نقوم بتحديث الكميات في الذاكرة والقاعدة
     foreach ($orderItems as $item) {
-      
-        Product::where('id', $item->product_id)->lockForUpdate()->increment('quantity', $item->quantity);
+        $product = $products->get($item->product_id);
+        if ($product) {
+            // تنفيذ الزيادة (increment)
+            $product->increment('quantity', $item->quantity);
+        }
     }
 
+    // 5. تحديث حالة الطلب
     $order->update(['status' => 'rejected']);
+
+    // 6. التحسين التقني (Cache Invalidation)
+    // بما أننا عدلنا بيانات، يجب حذف الكاش لضمان دقة لوحة التحكم فوراً
+    Cache::forget('admin_dashboard_stats');
+    
+    // إذا كان لديك كاش لقائمة الطلبات، يفضل مسحه أيضاً
+    if (Cache::has('admin_orders_list')) {
+         Cache::forget('admin_orders_list');
+    }
 
     return ['data' => $order->load('items.product', 'user')];
 }
+
+
+
+
 
     # Add (Caching (Redis) - filtered order lists can be cached per status)
     # Add (Cache Invalidation - when any order status changes)
