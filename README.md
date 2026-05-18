@@ -55,9 +55,9 @@
 ---
 
 ## 🚀 طريقة التشغيل وإعادة إنتاج الاختبارات (How to Run & Test)
+```bash
 
 ### 1. إعداد البيئة المحلية
-```bash
 # استنساخ المستودع
 git clone [https://github.com/Aya-Mohammad/E-Commarce.git](https://github.com/Aya-Mohammad/E-Commarce.git)
 
@@ -69,11 +69,11 @@ php artisan migrate --seed
 
 
 ### 2. توليد بيانات الاختبار (100 مستخدم متزامن)
-```bash
+
 php artisan tinker
 
 ### 3. تصفير الذاكرة وقاعدة البيانات قبل كل جولة اختبار
-```bash
+
 php artisan cache:clear && php artisan queue:clear
 -- SQL لتصفير المخزن والسلة قبل الفحص
 UPDATE products SET quantity = 10 WHERE id = 1;
