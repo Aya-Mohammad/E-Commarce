@@ -69,9 +69,11 @@ php artisan migrate --seed
 
 
 ### 2. توليد بيانات الاختبار (100 مستخدم متزامن)
+```bash
 php artisan tinker
 
 ### 3. تصفير الذاكرة وقاعدة البيانات قبل كل جولة اختبار
+```bash
 php artisan cache:clear && php artisan queue:clear
 -- SQL لتصفير المخزن والسلة قبل الفحص
 UPDATE products SET quantity = 10 WHERE id = 1;
