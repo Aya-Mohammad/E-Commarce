@@ -1,190 +1,163 @@
 <?php
-
+ 
 namespace App\Services\Admin;
-
-
-
-use Illuminate\Support\Facades\Cache;
+ 
+use App\Jobs\SendOrderApprovedNotificationJob;
+use App\Jobs\SendOrderRejectedNotificationJob;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
+ 
 class OrderService
 {
-    # Two admin requests can pass the status check simultaneously
-    # Fix: move order fetch + status check INSIDE Transaction with lockForUpdate()
-    // public function handleOrder(int $orderId, string $action): array
-    // {
-    //     return DB::transaction(function () use ($orderId, $action) {
-
-    //         $order = Order::lockForUpdate()->find($orderId); // ← داخل Transaction مع Lock
-
-    //         if (!$order) {
-    //             return ['error' => 'Order not found', 'status' => 404];
-    //         }
-
-    //         if ($order->status !== 'pending') {   // ← داخل Transaction
-    //             return ['error' => 'Cannot edit this order', 'status' => 400];
-    //         }
-
-    //         if ($action === 'approve') {
-    //             return $this->approveOrder($order);
-    //         }
-
-    //         return $this->rejectOrder($order);
-    //     });
-    // }
-
-
-
+    /**
+     * Cache Key Strategy (6)
+     */
+    private function orderDetailCacheKey(int $orderId): string
+    {
+        return "admin:order:detail:{$orderId}";
+    }
+ 
+    private function orderListCacheKey(string $status, int $page): string
+    {
+        return "admin:orders:status:{$status}:page:{$page}";
+    }
+ 
     public function handleOrder(int $orderId, string $action): array
-{
-    return DB::transaction(function () use ($orderId, $action) {
-        $order = Order::where('id', $orderId)->lockForUpdate()->first();
-
-        if (!$order) {
-            return ['error' => 'الطلب غير موجود', 'status' => 404];
+    {
+        /**
+         * ACID Transaction (8) + Pessimistic Locking (7)
+         */
+        $result = DB::transaction(function () use ($orderId, $action) {
+ 
+            // Pessimistic Locking (7) 
+            $order = Order::where('id', $orderId)
+                ->lockForUpdate()
+                ->first();
+ 
+            if (!$order) {
+                return ['error' => 'Order not found', 'status' => 404];
+            }
+ 
+            // Race Condition Check (1)
+            if ($order->status !== 'pending') {
+                return ['error' => 'This order has already been processed', 'status' => 400];
+            }
+ 
+            $result = ($action === 'approve')
+                ? $this->approveOrder($order)
+                : $this->rejectOrder($order);
+ 
+            /**
+             * Cache Invalidation (6)
+             */
+            Cache::forget($this->orderDetailCacheKey($orderId));
+            Cache::forget('admin_dashboard_stats');
+            $this->invalidateOrderListCache();
+ 
+            return $result;
+        });
+ 
+        /**
+         * Async Queue (3)
+         */
+        if (!isset($result['error'])) {
+            $order = $result['data'];
+            if ($action === 'approve') {
+                SendOrderApprovedNotificationJob::dispatch($order);
+            } else {
+                SendOrderRejectedNotificationJob::dispatch($order);
+            }
         }
-
-        if ($order->status !== 'pending') {
-            return ['error' => 'تمت معالجة هذا الطلب مسبقاً', 'status' => 400];
-        }
-
-        $result = ($action === 'approve') ? $this->approveOrder($order) : $this->rejectOrder($order);
-
-        Cache::forget('admin_dashboard_stats');
-
+ 
         return $result;
-    });
-}
-
-
-
-    # Add (Async Notification - notify user when order is approved via Queue)
-    # Add (Cache Invalidation - invalidate order cache after status change)
+    }
+ 
     private function approveOrder(Order $order): array
     {
         $order->update(['status' => 'approved']);
-
+ 
         return ['data' => $order->load('items.product', 'user')];
     }
-
-    # Add (Async Notification - notify user when order is rejected via Queue)
-    # Add (Cache Invalidation - invalidate order cache after status change)
-    # Add (Batch Processing - product quantity restore done one by one in foreach)
-    # Better: use single batch update instead of loop
-    // private function rejectOrder(Order $order): array
-    // {
-    //     $orderItems = OrderItem::where('order_id', $order->id)->get();
-
-    //     $productIds = $orderItems->pluck('product_id')->sort()->values();
-
-    //     $products = Product::whereIn('id', $productIds)
-    //         ->orderBy('id')
-    //         ->lockForUpdate()
-    //         ->get()
-    //         ->keyBy('id');
-
-    //     foreach ($orderItems as $item) {
-    //         $product = $products->get($item->product_id);
-
-    //         if ($product) {
-    //             $product->increment('quantity', $item->quantity);
-    //         }
-    //     }
-
-    //     $order->update(['status' => 'rejected']);
-
-    //     return ['data' => $order->load('items.product', 'user')];
-    // }
  
-
-    //first edit
-//     private function rejectOrder(Order $order): array
-// {
-//     $orderItems = OrderItem::where('order_id', $order->id)->get();
-
-//     foreach ($orderItems as $item) {
-      
-//         Product::where('id', $item->product_id)->lockForUpdate()->increment('quantity', $item->quantity);
-//     }
-
-//     $order->update(['status' => 'rejected']);
-
-//     return ['data' => $order->load('items.product', 'user')];
-// }
-
-
-
-
-private function rejectOrder(Order $order): array
-{
-    // 1. جلب العناصر (OrderItem)
-    $orderItems = OrderItem::where('order_id', $order->id)->get();
-
-    // 2. استخراج معرفات المنتجات وترتيبها (مهم جداً لمنع الـ Deadlock تقنياً)
-    $productIds = $orderItems->pluck('product_id')->sort()->values();
-
-    // 3. قفل جميع المنتجات المطلوبة بـ "ضربة واحدة" خارج الحلقة
-    // بدلاً من استعلام لكل منتج، نقوم باستعلام واحد لكل المنتجات
-    $products = Product::whereIn('id', $productIds)
-        ->orderBy('id') // الترتيب يضمن قفل البيانات بشكل آمن دائماً
-        ->lockForUpdate()
-        ->get()
-        ->keyBy('id');
-
-    // 4. الآن نقوم بتحديث الكميات في الذاكرة والقاعدة
-    foreach ($orderItems as $item) {
-        $product = $products->get($item->product_id);
-        if ($product) {
-            // تنفيذ الزيادة (increment)
-            $product->increment('quantity', $item->quantity);
+    private function rejectOrder(Order $order): array
+    {
+        $orderItems = OrderItem::where('order_id', $order->id)->get();
+ 
+        $productIds = $orderItems->pluck('product_id')->sort()->values();
+ 
+        /**
+         * Pessimistic Locking (7) — Batch Lock
+         * Batch Processing (4)
+         */
+        $products = Product::whereIn('id', $productIds)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('id');
+ 
+        foreach ($orderItems as $item) {
+            $product = $products->get($item->product_id);
+            if ($product) {
+                $product->increment('quantity', $item->quantity);
+ 
+                // Cache Invalidation (6)
+                Cache::forget("product:detail:{$item->product_id}");
+            }
         }
+ 
+        $order->update(['status' => 'rejected']);
+ 
+        return ['data' => $order->load('items.product', 'user')];
     }
-
-    // 5. تحديث حالة الطلب
-    $order->update(['status' => 'rejected']);
-
-    // 6. التحسين التقني (Cache Invalidation)
-    // بما أننا عدلنا بيانات، يجب حذف الكاش لضمان دقة لوحة التحكم فوراً
-    Cache::forget('admin_dashboard_stats');
-    
-    // إذا كان لديك كاش لقائمة الطلبات، يفضل مسحه أيضاً
-    if (Cache::has('admin_orders_list')) {
-         Cache::forget('admin_orders_list');
-    }
-
-    return ['data' => $order->load('items.product', 'user')];
-}
-
-
-
-
-
-    # Add (Caching (Redis) - filtered order lists can be cached per status)
-    # Add (Cache Invalidation - when any order status changes)
-    # Pagination already exists 
-    # Filtering by status already exists 
+ 
     public function getAllOrders(?string $status = null, int $perPage = 15)
     {
-        $allowed = ['pending', 'approved', 'rejected', 'delivered', 'cancelled'];
-
-        $query = Order::with('items.product', 'user');
-
-        if ($status && in_array($status, $allowed)) {
-            $query->where('status', $status);
-        }
-
-        return $query->orderBy('created_at', 'desc')->paginate($perPage);
+        $allowed  = ['pending', 'approved', 'rejected', 'delivered', 'cancelled'];
+        $status   = ($status && in_array($status, $allowed)) ? $status : 'all';
+        $page     = (int) request()->get('page', 1);
+ 
+        /**
+         * Distributed Caching (6)
+         * Resource Management (2)
+         */
+        $cacheKey = $this->orderListCacheKey($status, $page);
+ 
+        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($status, $perPage) {
+            $query = Order::with('items.product', 'user');
+ 
+            if ($status !== 'all') {
+                $query->where('status', $status);
+            }
+ 
+            return $query->orderBy('created_at', 'desc')->paginate($perPage);
+        });
     }
-
-    # Add (Caching (Redis) - single order data, good Cache candidate)
-    # Add (Cache Invalidation - when order is updated/cancelled/approved/rejected)
-    # Missing: no ownership check - any admin can see any order (this is fine for admin)
+ 
     public function getOrderById(int $id): ?Order
     {
-        return Order::with('items.product', 'user')->find($id);
+        /**
+         * Distributed Caching (6)
+         */
+        return Cache::remember($this->orderDetailCacheKey($id), now()->addMinutes(10), function () use ($id) {
+            return Order::with('items.product', 'user')->find($id);
+        });
+    }
+ 
+    /**
+     * Cache Invalidation (6)
+     */
+    private function invalidateOrderListCache(): void
+    {
+        $statuses = ['all', 'pending', 'approved', 'rejected', 'delivered', 'cancelled'];
+ 
+        foreach ($statuses as $status) {
+            for ($page = 1; $page <= 10; $page++) {
+                Cache::forget($this->orderListCacheKey($status, $page));
+            }
+        }
     }
 }

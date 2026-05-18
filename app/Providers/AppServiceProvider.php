@@ -7,11 +7,9 @@ use App\Models\Picture;
 use App\Models\Product;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Database\Eloquent\Relations\Relation;
-#_______________
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Http\Request;
-#_______________
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -29,9 +27,8 @@ class AppServiceProvider extends ServiceProvider
             'pictures'=>Picture::class,
         ]);
 
-    #___________________________________________________________________
         RateLimiter::for('orders', function (Request $request) {
-            return Limit::perMinute(10)->by($request->user()->id);
+            return Limit::perMinute(1000)->by($request->user()?->id ?: $request->ip());
         });
 
         RateLimiter::for('auth', function (Request $request) {
@@ -39,11 +36,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by(
-                $request->user()?->id ?: $request->ip()
-            );
+            return Limit::perMinute(1000)->by($request->user()?->id ?: $request->ip());
         });
-    #____________________________________________________________________
-    
     }
 }

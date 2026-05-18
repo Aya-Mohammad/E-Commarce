@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use JWTAuth;
 use Illuminate\Support\Facades\RateLimiter;
 use App\Jobs\ProcessUserImage;
+use Illuminate\Support\Facades\Cache;
 
 class AuthService
 {
@@ -21,49 +22,21 @@ class AuthService
         return $user ? 'existing_user' : 'new_user';
     }
 
-// _____________________________________________________________________________________________________
 
-    // public function login($credentials, $fcmToken = null)
-    // {
-    //     $ip = request()->ip();
-    //     $key = 'login_attempts_' . $ip;
-
-    //     // إذا تجاوز المحاولات، اقطع الطلب فوراً برمز 429
-    //     if (RateLimiter::tooManyAttempts($key, 5)) {
-    //         abort(429, 'Too many attempts.');
-    //     }
-
-    //     // محاولة الدخول
-    //     if (!$token = JWTAuth::attempt($credentials)) {
-    //         RateLimiter::hit($key, 60);
-            
-    //         // إذا البيانات خطأ، اقطع الطلب برمز 401
-    //         abort(401, 'Invalid credentials.');
-    //     }
-
-    //     RateLimiter::clear($key);
-
-    //     return [
-    //         'token' => $token,
-    //         'user'  => auth()->user(),
-    //     ];
-    // }
-
-    // Test By Elias
     public function login($credentials, $fcmToken = null)
     {
         $ip = request()->ip();
         $key = 'login_attempts_' . $ip;
 
-        // --- المرحلة 1: Rate Limiting (لا تزال موجودة للحماية) ---
+        // --- Rate Limiting ---
         if (RateLimiter::tooManyAttempts($key, 5)) {
-            abort(429, 'Too many attempts. Protected by Rate Limiter.');
+            abort(429, 'Too many attempts.');
         }
 
-        // --- المرحلة 2: Distributed Caching (Redis) ---
+        // --- Redis Caching ---
         $phone = $credentials['phone'];
         $cacheKey = "user_auth_data_{$phone}";
-
+        
         $user = Cache::remember($cacheKey, 3600, function () use ($phone) {
             return \App\Models\User::where('phone', $phone)->first();
         });
@@ -75,54 +48,18 @@ class AuthService
 
         RateLimiter::clear($key);
 
-        if ($fcmToken && auth()->user()) {
+        // --- Async Jobs ---
+        \App\Jobs\SendLoginNotification::dispatch($user, request()->userAgent());
+
+        if ($fcmToken) {
             auth()->user()->update(['fcm_token' => $fcmToken]);
         }
 
         return [
             'token' => $token,
-            'user'  => $user, 
+            'user'  => $user,
         ];
     }
-
-    # Round 3
-    // public function login($credentials, $fcmToken = null)
-    // {
-    //     $ip = request()->ip();
-    //     $key = 'login_attempts_' . $ip;
-
-    //     // --- المرحلة 1: Rate Limiting ---
-    //     if (RateLimiter::tooManyAttempts($key, 5)) {
-    //         abort(429, 'Too many attempts.');
-    //     }
-
-    //     // --- المرحلة 2: Redis Caching ---
-    //     $phone = $credentials['phone'];
-    //     $cacheKey = "user_auth_data_{$phone}";
-        
-    //     $user = Cache::remember($cacheKey, 3600, function () use ($phone) {
-    //         return \App\Models\User::where('phone', $phone)->first();
-    //     });
-
-    //     if (!$token = JWTAuth::attempt($credentials)) {
-    //         RateLimiter::hit($key, 60);
-    //         abort(401, 'Invalid credentials.');
-    //     }
-
-    //     RateLimiter::clear($key);
-
-    //     // --- المرحلة 3: Async Jobs (العمليات الخلفية) ---
-    //     \App\Jobs\SendLoginNotification::dispatch($user, request()->userAgent());
-
-    //     if ($fcmToken) {
-    //         auth()->user()->update(['fcm_token' => $fcmToken]);
-    //     }
-
-    //     return [
-    //         'token' => $token,
-    //         'user'  => $user,
-    //     ];
-    // }
 // _____________________________________________________________________________________
     // public function register($data)
     // {

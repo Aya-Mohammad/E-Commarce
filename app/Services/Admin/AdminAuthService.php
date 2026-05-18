@@ -12,9 +12,6 @@ use Illuminate\Support\Str;
 
 class AdminAuthService
 {
-    # Critical: admin login with no rate limit is a serious security risk
-    # Add (Async Notification - notify admin on new login (security alert))
-    # Missing: no logging of admin login attempts (IP, time, device)
     public function login(array $data): ?array
     {
         $key = 'admin_login_' . request()->ip();
@@ -37,12 +34,6 @@ class AdminAuthService
         ];
     }
 
-    # Add (Async Queue - image processing should be done in background Job)
-    # Risk: Orphan Files - image stored inside Transaction
-    # same problem as AuthService::register()
-    # Fix: store image AFTER DB commit
-    # Risk: no restriction on who can register as admin
-    # any request can create a new admin - missing authorization check
     public function register(array $data): array
     {
         DB::beginTransaction();
@@ -98,17 +89,11 @@ class AdminAuthService
         }
     }
 
-    # Missing: no token invalidation (JWT token remains valid after logout)
-    # compare with AuthService::logout() which uses JWTAuth::invalidate()
-    # this logout only clears the session, token still usable
-    # Missing: no fcm_token clearing on admin logout
     public function logout(): void
     {
         Auth::guard('admin')->logout();
     }
 
-    # Add (Caching (Redis) - called on every authenticated request)
-    # short TTL Cache per admin session
     public function getUser(): ?AdminResource
     {
         $admin = Auth::guard('admin')->user();
