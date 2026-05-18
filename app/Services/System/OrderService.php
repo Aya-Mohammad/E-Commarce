@@ -109,6 +109,144 @@ class OrderService
     
     //     return $order->load('items.product');
     // }
+
+    /*
+    *___________________________________________________
+        Test NFR 2 (Before Handling) -- Control Capacity 
+    *___________________________________________________
+    */
+
+    // public function placeOrder()
+    // {
+
+    //     $userId = auth()->id();
+ 
+    //     /**
+    //      * Distributed Lock (Redis) NFR(7)
+    //      */
+    //     $lock = Cache::lock("place_order:{$userId}", 10);
+ 
+    //     if (!$lock->get()) {
+    //         return $this->error('Another order is being processed, please wait', 429);
+    //     }
+ 
+    //     try {
+ 
+    //         /**
+    //          * ACID Transaction NFR(8)
+    //          */
+    //         $order = DB::transaction(function () use ($userId) {
+ 
+    //             /**
+    //              * Cart (Cached Read) NFR(6)
+    //              */
+    //             $cartItems = Cache::remember("cart:{$userId}", 120, function () use ($userId) {
+    //                 return Cart::where('user_id', $userId)
+    //                     ->with('product')
+    //                     ->get();
+    //             });
+
+    //             # for test NFR 3 Queue
+    //             // $cartItems = Cart::where('user_id', $userId)->with('product')->get();
+ 
+    //             if ($cartItems->isEmpty()) {
+    //                 return $this->error('Cart is empty', 422);
+    //             }
+ 
+    //             $productIds = $cartItems->pluck('product_id')->unique()->values();
+ 
+    //             /**
+    //              * Pessimistic Locking NFR(7) — Critical Section
+    //              */
+    //             $products = Product::whereIn('id', $productIds)
+    //                 ->orderBy('id')     
+    //                 ->lockForUpdate() 
+    //                 ->get()
+    //                 ->keyBy('id');
+ 
+    //             $preparedItems = [];
+    //             $totalPrice    = 0;
+ 
+    //             foreach ($cartItems as $cartItem) {
+ 
+    //                 $product = $products->get($cartItem->product_id);
+ 
+    //                 if (!$product) {
+    //                     return $this->error('Product not found', 404);
+    //                 }
+ 
+    //                 // Race Condition Check
+    //                 if ($product->quantity < $cartItem->quantity) {
+    //                     return $this->error(
+    //                         "Not enough stock for product: {$product->name}",
+    //                         422
+    //                     );
+    //                 }
+ 
+    //                 $price = (float) $product->price;
+ 
+    //                 $preparedItems[] = [
+    //                     'product'    => $product,
+    //                     'product_id' => $product->id,
+    //                     'quantity'   => $cartItem->quantity,
+    //                     'price'      => $price,
+    //                 ];
+ 
+    //                 $totalPrice += $price * $cartItem->quantity;
+    //             }
+    //             $order = Order::create([
+    //                 'user_id'     => $userId,
+    //                 'total_price' => $totalPrice,
+    //                 'status'      => 'pending',
+    //             ]);
+ 
+    //             /**
+    //              * Batch Insert + Stock Update NFR(4)
+    //              */
+    //             $orderItems = [];
+ 
+    //             foreach ($preparedItems as $item) {
+ 
+    //                 $orderItems[] = [
+    //                     'order_id'   => $order->id,
+    //                     'product_id' => $item['product_id'],
+    //                     'quantity'   => $item['quantity'],
+    //                     'price'      => $item['price'],
+    //                     'created_at' => now(),
+    //                     'updated_at' => now(),
+    //                 ];
+ 
+    //                 $item['product']->decrement('quantity', $item['quantity']);
+    //             }
+ 
+    //             OrderItem::insert($orderItems); // Batch Insert
+    //             Cart::where('user_id', $userId)->delete();
+ 
+    //             /**
+    //              * Cache Invalidation NFR(6)
+    //              */
+    //             Cache::forget("cart:{$userId}");
+    //             Cache::forget("cart_count:{$userId}");
+    //             Cache::forget("user_orders:{$userId}");
+ 
+    //             return $order->load('items.product');
+    //         });
+ 
+    //         /**
+    //          * Async Queue NFR(3)
+    //          */
+    //         if (!isset($order['error'])) {
+    //             SendOrderConfirmationJob::dispatch($order);
+    //             GenerateInvoiceJob::dispatch($order);
+    //             // sleep(3);
+    //         }
+ 
+    //         return $order;
+ 
+    //     } finally {
+    //         $lock->release();
+    //     }
+    // }
  
 
     /*
@@ -397,6 +535,24 @@ class OrderService
     */
     public function placeOrder()
     {
+
+        $globalExecuted = \Illuminate\Support\Facades\RateLimiter::attempt(
+            'global-system-orders',
+            $maxOrdersPerMinute = 60, 
+            function() {
+                // No code needed here, just reserving the attempt
+            },
+            $decaySeconds = 60
+        );
+
+        if (! $globalExecuted) {
+            return response()->json([
+                'success' => false,
+                'data' => null,
+                'message' => 'Too Many Requests. The server is currently overloaded, please try again later.',
+                'errors' => []
+            ], 429);
+        }
         $userId = auth()->id();
  
         /**

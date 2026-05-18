@@ -7,6 +7,7 @@ use App\Services\System\OrderService;
 use App\Http\Requests\System\Order\StoreOrderRequest;
 use App\Http\Requests\System\Order\UpdateProductQuantityRequest;
 use App\Traits\ApiResponseTrait;
+use Illuminate\Support\Facades\Redis;
 
 class OrderController extends Controller
 {
@@ -25,6 +26,19 @@ class OrderController extends Controller
 
     public function store(StoreOrderRequest $request)
     {
+        $currentOrders = Redis::incr('global_orders_count');
+
+        if ($currentOrders == 1) {
+            Redis::expire('global_orders_count', 60);
+        }
+
+        if ($currentOrders > 60) {
+            return $this->apiResponse(
+                null,
+                'Too Many Requests. The server is currently overloaded, please try again later.',
+                429
+            );
+        }
         return $this->respond(
             $this->service->placeOrder(),
             'Order placed successfully',
