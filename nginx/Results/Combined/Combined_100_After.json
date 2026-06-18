@@ -1,0 +1,15 @@
+{
+    "vus": 100,
+    "scenarios": {
+        "browsers": 30,
+        "shoppers": 50,
+        "buyers": 20
+    },
+    "total_requests": 1273,
+    "failed_requests": 14,
+    "avg_response_time_ms": 10891.163949096624,
+    "max_response_time_ms": 16118.1443,
+    "p95_response_time_ms": 13932.603619999998,
+    "success_rate": "100.00",
+    "failed_rate": "1.10"
+}

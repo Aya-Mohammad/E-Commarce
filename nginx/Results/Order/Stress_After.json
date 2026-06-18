@@ -1,0 +1,9 @@
+{
+    "total_requests": 5727,
+    "failed_requests": 5577,
+    "avg_response_time_ms": 1760.0655628601357,
+    "max_response_time_ms": 27411.4578,
+    "p95_response_time_ms": 22373.8644,
+    "success_rate": "8.61",
+    "failed_rate": "97.38"
+}
