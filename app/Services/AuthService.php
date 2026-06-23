@@ -32,6 +32,7 @@ class AuthService
             'fcm_token' => $data['fcm_token'] ?? null,
         ]);
 
+        //NFR #3 - Asynchronous Queues
         if (isset($data['image_path']) && $data['image_path'] instanceof \Illuminate\Http\UploadedFile) {
             $tempPath = $data['image_path']->store("uploads/users/{$user->phone}", 'public');
             ProcessUserImage::dispatch($user->id, $tempPath)->onQueue('images');
@@ -88,6 +89,7 @@ class AuthService
 
         Log::channel($channel)->info("LOGIN START LEGACY | IP={$ip}");
 
+        //NFR #2 - Resource Management & Capacity Control
         if (RateLimiter::tooManyAttempts($key, 5)) {
             Log::channel($channel)->warning("LOGIN BLOCKED BY RATE LIMIT");
             abort(429, 'Too many attempts.');
@@ -105,6 +107,7 @@ class AuthService
 
         Log::channel($channel)->info("LOGIN SUCCESS");
         RateLimiter::clear($key);
+        //NFR #3 - Asynchronous Queues
         SendLoginNotification::dispatch($user, request()->userAgent());
 
         if ($fcmToken && $user) {
@@ -126,6 +129,7 @@ class AuthService
 
         Log::channel($channel)->debug("LOGIN START OPTIMIZED | IP={$ip}");
 
+        //NFR #2 - Resource Management & Capacity Control
         if (RateLimiter::tooManyAttempts($key, 5)) {
             Log::channel($channel)->debug("LOGIN RATE LIMIT HIT");
             abort(429, 'Too many attempts.');
@@ -136,6 +140,7 @@ class AuthService
 
         Log::channel($channel)->debug("LOGIN CACHE CHECK");
 
+        //NFR #6 - Distributed Caching
         $user = Cache::remember(
             $cacheKey,
             600,
@@ -157,6 +162,7 @@ class AuthService
 
         RateLimiter::clear($key);
 
+        //NFR #3 - Asynchronous Queues
         SendLoginNotification::dispatch($user, request()->userAgent());
 
         if ($fcmToken && $user) {
@@ -167,6 +173,7 @@ class AuthService
             ]);
         }
 
+        //NFR #6 - Cache Invalidation
         Cache::forget($cacheKey);
 
         Log::channel($channel)->debug("LOGIN END");
