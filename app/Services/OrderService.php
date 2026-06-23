@@ -22,7 +22,8 @@ class OrderService
     public function getUserOrders()
     {
         $page = request('page', 1);
- 
+
+        //NFR #6 - Distributed Caching
         return Cache::remember(
             "user_orders_" . auth()->id() . "_page_" . $page, 60,
             function () {
@@ -135,6 +136,8 @@ class OrderService
     private function placeOrderOptimized()
     {
         $channel = $this->getLogChannel();
+
+        // NFR #2 - Resource Management & Capacity Control
         $globalExecuted = RateLimiter::attempt(
             'global-system-orders',
             $maxOrdersPerMinute = 1000,
@@ -153,7 +156,8 @@ class OrderService
 
         Log::channel($channel)->info("USER {$userId} START checkout request");
         $maxCartItems = 50;
-
+        
+        //NFR #2 - Resource Management & Capacity Control
         $cartItemsCount = Cache::remember("cart_count:{$userId}", 300, function () use ($userId) {
             return Cart::where('user_id', $userId)->count();
         });
@@ -165,6 +169,8 @@ class OrderService
             ];
         }
 
+        //NFR #2 - Resource Management (Distributed Mutex Lock)
+        //NFR #1 - Concurrent Access Protection
         $lock = Cache::lock("place_order:{$userId}", 10);
 
         if (!$lock->get()) {
@@ -200,11 +206,8 @@ class OrderService
 
                 Log::channel($channel)->info("USER {$userId} WAITING FOR DB LOCK");
 
-                $products = Product::whereIn('id', $productIds)
-                    ->orderBy('id')
-                    ->lockForUpdate()
-                    ->get()
-                    ->keyBy('id');
+                //NFR #7 - Pessimistic Locking
+                $products = Product::whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
 
                 Log::channel($channel)->info("USER {$userId} ACQUIRED DB LOCK");
 
@@ -216,6 +219,7 @@ class OrderService
                     $product = $products->get($cartItem->product_id);
                     Log::channel($channel)->info("USER {$userId} READ stock={$product->quantity}");
 
+                    //NFR #1 - Data Integrity
                     if (!$product || $product->quantity < $cartItem->quantity) {
 
                         Log::channel($channel)->info("USER {$userId} FAILED insufficient stock={$product?->quantity}");
@@ -261,21 +265,25 @@ class OrderService
                         'updated_at' => now(),
                     ];
 
+                    //NFR #1 - Atomic Stock Decrement
                     $item['product']->decrement('quantity', $item['quantity']);
 
                     Log::channel($channel)->info("USER {$userId} DECREMENTED product={$item['product_id']}");
                 }
 
+                //NFR #8 - ACID Transaction
                 OrderItem::insert($orderItems);
 
                 Cart::where('user_id', $userId)->delete();
 
                 DB::afterCommit(function () use ($order, $userId) {
-                    
+
+                    //NFR #6 - Cache Invalidation
                     Cache::forget("cart_count:{$userId}");
                     Cache::forget("cart:user:{$userId}:page:1");
                     Cache::forget("user_orders_{$userId}_page_1");
 
+                    //NFR #3 - Asynchronous Queues
                     SendOrderConfirmationJob::dispatch($order);
                     GenerateInvoiceJob::dispatch($order);
                 });
