@@ -13,32 +13,27 @@ class SalesReportController extends Controller
 
     public function __construct(protected SalesReportService $service) {}
 
-    // GET /admin/sales-reports
     public function index(Request $request)
     {
-        $days    = min((int) $request->get('days', 30), 90);
+        $days  = min((int) $request->get('days', 30), 90);
         $reports = $this->service->getReports($days);
 
         return $this->apiResponse($reports, 'Sales reports fetched successfully');
     }
 
-    // GET /admin/sales-reports/{date}
     public function show(string $date)
     {
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
             return $this->apiResponse(null, 'Invalid date format. Use YYYY-MM-DD', 422);
         }
-
         $report = $this->service->getReportByDate($date);
 
         if (!$report) {
             return $this->apiResponse(null, 'No report found for this date', 404);
         }
-
         return $this->apiResponse($report, 'Report fetched successfully');
     }
 
-    // POST /admin/sales-reports/trigger
     public function trigger(Request $request)
     {
         $request->validate([
