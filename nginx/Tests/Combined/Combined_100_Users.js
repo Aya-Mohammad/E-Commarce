@@ -4,7 +4,6 @@ import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.2/index.js';
 
 export const options = {
     scenarios: {
-        // 30 مستخدم: بحث + عرض منتج فقط (متصفحون)
         browsers: {
             executor: 'ramping-vus',
             startVUs: 0,
@@ -15,7 +14,6 @@ export const options = {
             exec: 'browserScenario',
             gracefulRampDown: '10s',
         },
-        // 50 مستخدم: بحث + عرض + إضافة للسلة (متسوقون)
         shoppers: {
             executor: 'ramping-vus',
             startVUs: 0,
@@ -26,7 +24,6 @@ export const options = {
             exec: 'shopperScenario',
             gracefulRampDown: '10s',
         },
-        // 20 مستخدم: كل العمليات + طلب شراء (مشترون)
         buyers: {
             executor: 'ramping-vus',
             startVUs: 0,
@@ -42,18 +39,13 @@ export const options = {
 
 const BASE_URL = 'http://127.0.0.1';
 
-// ==========================================
-// Token Cache — per VU (يُحفظ بين الـ iterations)
-// ==========================================
 let cachedAuthHeaders = null;
 
 function getAuthHeaders() {
-    // إذا عندنا token محفوظ — أعد استخدامه
     if (cachedAuthHeaders !== null) {
         return cachedAuthHeaders;
     }
 
-    // أول مرة فقط: سجّل الدخول
     const phone = String(963900000000 + __VU);
     const res = http.post(
         `${BASE_URL}/api/auth/login`,
@@ -74,7 +66,6 @@ function getAuthHeaders() {
     }
 
     const body = res.json();
-    // عدّلي المسار حسب شكل response عندك
     const token = body?.data?.access_token ?? body?.data?.token ?? body?.token;
 
     if (!token) {
@@ -91,10 +82,6 @@ function getAuthHeaders() {
 
     return cachedAuthHeaders;
 }
-
-// ==========================================
-// العمليات
-// ==========================================
 
 function performSearch(base) {
     group('Search', function () {
@@ -144,10 +131,6 @@ function placeOrder(base) {
     sleep(0.5);
 }
 
-// ==========================================
-// السيناريوهات
-// ==========================================
-
 export function browserScenario() {
     const headers = getAuthHeaders();
     if (!headers) { sleep(2); return; }
@@ -177,10 +160,6 @@ export function buyerScenario() {
     placeOrder(headers);
     sleep(0.5);
 }
-
-// ==========================================
-// النتائج
-// ==========================================
 
 export function handleSummary(data) {
     const isStrictNfr = __ENV.STRICT_NFR_MODE === 'true';
