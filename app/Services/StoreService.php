@@ -7,9 +7,6 @@ use Illuminate\Support\Facades\Cache;
  
 class StoreService
 {
-    /**
-     * Cache Key Strategy (6)
-     */
     private function storeListCacheKey(int $page): string
     {
         return "stores:page:{$page}";
@@ -28,11 +25,7 @@ class StoreService
     public function index(int $perPage = 15)
     {
         $page = (int) request()->get('page', 1);
- 
-        /**
-         * Distributed Caching (6)
-         * Resource Management (2)
-         */
+        //NFR #6 - Distributed Caching
         return Cache::remember($this->storeListCacheKey($page), now()->addHour(), function () use ($perPage) {
             return Store::with('image')->paginate($perPage);
         });
@@ -40,16 +33,10 @@ class StoreService
  
     public function show($id)
     {
-        // Capacity Control (2)
-        if (!is_numeric($id) || (int) $id <= 0) {
-            return null;
-        }
- 
+        //NFR #2 - Resource Management & Capacity Control
+        if (!is_numeric($id) || (int) $id <= 0) { return null; }
         $id = (int) $id;
- 
-        /**
-         * Distributed Caching (6)
-         */
+        //NFR #6 - Distributed Caching
         return Cache::remember($this->storeDetailCacheKey($id), now()->addHours(24), function () use ($id) {
             return Store::with(['image', 'products'])->findOrFail($id);
         });
@@ -57,23 +44,16 @@ class StoreService
  
     public function getStoreProducts($storeId, int $perPage = 15)
     {
-        // Capacity Control (2)
-        if (!is_numeric($storeId) || (int) $storeId <= 0) {
-            return null;
-        }
+        //NFR #2 - Resource Management & Capacity Control
+        if (!is_numeric($storeId) || (int) $storeId <= 0) { return null; }
  
         $storeId = (int) $storeId;
         $page    = (int) request()->get('page', 1);
- 
-        /**
-         * Distributed Caching (6)
-         */
         $store = Store::find($storeId);
  
-        if (!$store) {
-            return null;
-        }
- 
+        if (!$store) { return null; }
+
+        ////NFR #6 - Distributed Caching
         return Cache::remember($this->storeProductsCacheKey($storeId, $page), now()->addMinutes(30), function () use ($store, $perPage) {
             return $store->products()->with('image')->paginate($perPage);
         });
@@ -85,10 +65,9 @@ class StoreService
         $startWorking = request()->query('start_working');
         $endWorking   = request()->query('end_working');
         $deliveryCost = request()->query('delivery_cost');
- 
-        /**
-         * Capacity Control (2)
-         */
+
+        //NFR #2 - Resource Management & Capacity Control
+        //NFR #1 - Data Integrity (Input Validation)
         if ($distance !== null && (!is_numeric($distance) || (float) $distance < 0)) {
             return ['error' => 'Invalid distance value', 'status' => 422];
         }
@@ -96,10 +75,8 @@ class StoreService
         if ($deliveryCost !== null && (!is_numeric($deliveryCost) || (float) $deliveryCost < 0)) {
             return ['error' => 'Invalid delivery cost value', 'status' => 422];
         }
- 
-        /**
-         * Data Integrity (1)
-         */
+
+        //NFR #1 - Data Integrity
         $workingHours = null;
         if ($startWorking !== null && $endWorking !== null) {
             if (!is_numeric($startWorking) || !is_numeric($endWorking)) {
@@ -124,18 +101,14 @@ class StoreService
         if ($deliveryCost !== null) {
             $query->where('delivery_cost', '<=', (float) $deliveryCost);
         }
- 
-        /**
-         * Resource Management (2)
-         */
+
+        //NFR #2 - Resource Management (Pagination)
         return $query->paginate(15);
     }
- 
-    /**
-     * Cache Invalidation (6)
-     */
+
     public function invalidateStoreCache(int $storeId): void
     {
+        //NFR #6 - Cache Invalidation Strategy
         Cache::forget($this->storeDetailCacheKey($storeId));
          for ($page = 1; $page <= 10; $page++) {
             Cache::forget($this->storeListCacheKey($page));
