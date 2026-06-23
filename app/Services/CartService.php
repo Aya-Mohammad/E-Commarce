@@ -19,6 +19,7 @@ class CartService
     {
         $userId = auth()->id();
 
+        //NFR #7 - Pessimistic Locking
         return DB::transaction(function () use ($id, $userId) {
  
             $cart = Cart::where('id', $id)->where('user_id', $userId)->lockForUpdate() ->first();
@@ -26,7 +27,8 @@ class CartService
             if (!$cart) { return ['error' => 'Cart item not found', 'status' => 404]; }
  
             $cart->delete();
- 
+
+            //NFR #6 - Cache Invalidation
             Cache::forget($this->cartCacheKey($userId));
  
             return true;
@@ -44,7 +46,8 @@ class CartService
         return DB::transaction(function () use ($id, $quantity) {
  
             $userId = auth()->id();
- 
+
+            //NFR #7 - Pessimistic Locking
             $cart = Cart::where('id', $id)->where('user_id', $userId)->lockForUpdate()->first();
  
             if (!$cart) { return ['error' => 'Cart item not found', 'status' => 404]; }
@@ -55,6 +58,7 @@ class CartService
                 return ['error' => 'Product not found', 'status' => 404];
             }
 
+            //NFR #1 - Concurrent Access & Data Integrity
             if ($product->quantity < $quantity) {
                 return ['error' => 'Not enough stock', 'status' => 422];
             }
@@ -64,7 +68,8 @@ class CartService
             if ($product->quantity < $quantity) { return ['error' => 'Not enough stock', 'status' => 422]; }
  
             $cart->update(['quantity' => $quantity]);
- 
+
+            //NFR #6 - Cache Invalidation
             Cache::forget($this->cartCacheKey($userId, 1)); 
             Cache::forget("product:detail:{$product->id}");
  
@@ -78,6 +83,7 @@ class CartService
         $perPage = 10;
         $page    = (int) request()->get('page', 1);
         $cacheKey = $this->cartCacheKey($userId, $page);
+        //NFR #6 - Distributed Caching
         $cart = Cache::remember($cacheKey, now()->addMinutes(10), function () use ($userId, $perPage) {
             return Cart::where('user_id', $userId)
                 ->with('product')
@@ -180,9 +186,9 @@ class CartService
 
             Log::channel($channel)->debug("USER {$userId} ACQUIRING DB LOCK");
 
-            $product = Product::where('id', $productId)
-                ->lockForUpdate()
-                ->first();
+            //NFR #1 - Race Condition Fix
+            //NFR #7 - Pessimistic Locking
+            $product = Product::where('id', $productId)->lockForUpdate()->first();
 
             Log::channel($channel)->debug("USER {$userId} ACQUIRING DB LOCK");
 
@@ -193,19 +199,19 @@ class CartService
 
             Log::channel($channel)->debug("USER {$userId} ACQUIRED DB LOCK stock={$product->quantity}");
 
-            $cartItem   = Cart::where('user_id', $userId)
-                ->where('product_id', $productId)
-                ->lockForUpdate()
-                ->first();
+            //NFR #7 - Pessimistic Locking 
+            $cartItem   = Cart::where('user_id', $userId)->where('product_id', $productId)->lockForUpdate()->first();
 
             $currentQty = $cartItem?->quantity ?? 0;
-            $newQty     = $currentQty + $qty;
+            $newQty  = $currentQty + $qty;
 
+            //NFR #2 - Resource Management & Capacity Control
             if ($newQty > $maxPerProduct) {
                 Log::channel($channel)->debug("USER {$userId} FAILED max per product");
                 return ['error' => "Max allowed is {$maxPerProduct}", 'status' => 422];
             }
 
+            //NFR #1 - Data Integrity
             if ($product->quantity < $qty) {
                 return ['error' => 'Not enough stock', 'status' => 422];
             }
@@ -221,6 +227,7 @@ class CartService
 
             Log::channel($channel)->debug("USER {$userId} RELEASED DB LOCK");
 
+            //NFR #6 - Cache Invalidation
             Cache::forget($this->cartCacheKey($userId, 1));
             Cache::forget("cart_count:{$userId}");
             Cache::forget("product:detail:{$productId}");
