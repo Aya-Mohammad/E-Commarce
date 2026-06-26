@@ -1,4 +1,4 @@
-# High-Performance E-Commerce Backend
+# High-Performance E-Commerce Larevel Backend
 
 A production-grade e-commerce backend built with **Laravel 11**, **MySQL**, **Redis**, **Nginx**, and **k6**, designed to demonstrate how modern backend systems maintain reliability, consistency, and high performance under concurrent workloads.
 
@@ -128,3 +128,95 @@ The optimized system successfully supports one hundred concurrent users executin
 ### NFR#10 — Performance Monitoring
 
 A custom AOP middleware records request duration, memory usage, executed database queries, response status, and request metadata, enabling bottleneck identification and quantitative performance comparison.
+
+## Running Performance Tests
+
+All performance experiments can be executed in two configurations:
+
+* **Baseline (Before Optimization)** – Runs the application using the standard configuration without Redis-based optimizations.
+* **Optimized (After Optimization)** – Enables caching, distributed locking, asynchronous queues, and other performance optimizations.
+
+### Baseline Configuration
+
+```env
+STRICT_NFR_MODE=false
+QUEUE_CONNECTION=sync
+SESSION_DRIVER=file
+CACHE_STORE=file
+```
+
+Run any test using:
+
+```bash
+k6 run -e STRICT_NFR_MODE=false <test-script>
+```
+
+---
+
+### Optimized Configuration
+
+```env
+STRICT_NFR_MODE=true
+QUEUE_CONNECTION=redis
+SESSION_DRIVER=redis
+CACHE_STORE=redis
+```
+
+Before running the optimized tests, ensure that:
+
+* Redis is running.
+* Queue workers are started.
+* All three Laravel instances are running.
+* Nginx is configured as the reverse proxy.
+
+Run any test using:
+
+```bash
+k6 run -e STRICT_NFR_MODE=true <test-script>
+```
+
+---
+
+### Starting the Full Environment
+
+Start the three Laravel application instances:
+
+```bash
+# Terminal 1
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8001
+
+# Terminal 2
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8002
+
+# Terminal 3
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8003
+```
+
+Start Nginx:
+
+```bash
+start nginx
+```
+
+Start the queue workers (optimized mode only):
+
+```bash
+php artisan queue:work --queue=default,reports
+```
+
+---
+
+### Available Test Scripts
+
+| Test               | Script                                 | Purpose                                                                                                          |
+| ------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Race Condition     | `Tests/Order/Order_Race_Condition.js`  | Verifies stock consistency under concurrent checkout requests.                                                   |
+| Duplicate Checkout | `Tests/Order/Duplicate_Checkout.js`    | Validates Redis distributed locking.                                                                             |
+| Login Performance  | `Tests/Auth/Login.js`                  | Measures the impact of asynchronous job processing.                                                              |
+| Search Performance | `Tests/Search/Search.js`               | Benchmarks Redis caching and MySQL full-text search.                                                             |
+| Stress Test        | `Tests/Order/Stress.js`                | Evaluates system stability under heavy traffic.                                                                  |
+| Combined Workload  | `Tests/Combined/Combined_100_Users.js` | Simulates a realistic workload with 100 concurrent users performing browsing, shopping, and checkout operations. |
+
