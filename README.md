@@ -295,34 +295,124 @@ k6 run -e STRICT_NFR_MODE=true <test-script>
 
 ## Test Execution Guide
 
-| Test | Preparation | Infrastructure | Run Script |
-|------|-------------|----------------|------------|
-| **Race Condition** | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Seed carts for 80 users using Tinker. | Start **3 Laravel instances** (ports 8001–8003) with `PHP_CLI_SERVER_WORKERS=10` each, then start **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Order_Race_Condition.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Order_Race_Condition.js` |
-| **Order Stress** | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Set product quantity to **500** and seed carts for **150 users**. | Start **3 Laravel instances** and **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Stress.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Stress.js` |
-| **Duplicate Checkout** | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens` | Start **3 Laravel instances** and **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Duplicate_Checkout.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Duplicate_Checkout.js` |
-| **Search Performance** | `php artisan migrate:fresh --seed` | Start Laravel instances and Nginx. | `k6 run -e STRICT_NFR_MODE=false Search/Search.js`<br>`k6 run -e STRICT_NFR_MODE=true Search/Search.js` |
-| **Authentication (Async Jobs)** | `php artisan migrate:fresh --seed` | Start Laravel instances, Nginx, and Queue Workers (after optimization). | `k6 run -e STRICT_NFR_MODE=false Auth/Login.js`<br>`k6 run -e STRICT_NFR_MODE=true Auth/Login.js` |
-| **Combined 100 Users** | `php artisan migrate:fresh --seed`<br>Clear orders, carts, and order_items, then reset product stock using Tinker. | Start **3 Laravel instances**, **Nginx**, and **3 Queue Workers**. | `k6 run -e STRICT_NFR_MODE=false Combined/Combined_100_Users.js`<br>`k6 run -e STRICT_NFR_MODE=true Combined/Combined_100_Users.js` |
-| **Batch Processing** | Insert **1500 approved orders** using Tinker. | Start the **reports queue worker**. | `php artisan queue:work --queue=reports --tries=1` |
+# PLACE ORDER - TEST SCENARIOS
 
-### Common Infrastructure
+---
 
-The following services must be running before executing any load test:
-
-* Three Laravel instances (`8001`, `8002`, `8003`)
-* `PHP_CLI_SERVER_WORKERS=10` for each instance
-* Nginx configured as the load balancer
-* Queue Workers (required for tests involving asynchronous jobs and the combined system test)
-* Redis and MySQL services
-* Valid JWT tokens generated using:
+## 1. Race Condition Test 
 
 ```bash
+php artisan mi:fresh --seed
 php artisan test:generate-tokens
-```
 
 ### Reset Logs
 
 Before running a new test, clear the previous logs:
+php artisan tinker;
+
+DB::table('carts')->truncate();
+
+$rows = [];
+for ($userId = 1; $userId <= 80; $userId++) {
+    $rows[] = [
+        'user_id'    => $userId,
+        'product_id' => 1,
+        'quantity'   => 1,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ];
+}
+
+DB::table('carts')->insert($rows);
+
+DB::table('orders')->count();
+```
+## 2. Place Order Stress Test
+```bash
+php artisan mi:fresh --seed
+php artisan test:generate-tokens
+
+DB::table('carts')->truncate();
+
+DB::table('products')
+    ->where('id', 1)
+    ->update(['quantity' => 500]);
+
+$rows = [];
+for ($userId = 1; $userId <= 150; $userId++) {
+    $rows[] = [
+        'user_id'    => $userId,
+        'product_id' => 1,
+        'quantity'   => 1,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ];
+}
+
+DB::table('carts')->insert($rows);
+
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8001
+
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8002
+
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8003
+```
+
+## 3.Search & Login Stress Test
+```bash
+php artisan mi:fresh --seed
+```
+
+## 4.Chunck Test
+```bash
+php artisan tinker;
+
+$orders = [];
+
+for ($i = 1; $i <= 1500; $i++) {
+    $orders[] = [
+        'user_id' => rand(1, 150),
+        'status' => 'approved',
+        'total_price' => rand(100, 1000),
+        'created_at' => now()->subDay(),
+        'updated_at' => now()->subDay(),
+    ];
+}
+
+\App\Models\Order::insert($orders);
+
+\App\Models\Order::count();
+```
+
+## 5.System Stress Test
+```bash
+php artisan mi:fresh --seed
+php artisan tinker;
+
+Schema::disableForeignKeyConstraints();
+
+DB::table('order_items')->truncate();
+DB::table('orders')->truncate();
+DB::table('carts')->truncate();
+
+App\Models\Product::where('id', 1)->update([
+    'quantity' => 10
+]);
+
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8001
+
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8002
+
+set PHP_CLI_SERVER_WORKERS=10
+php artisan serve --port=8003
+
+php artisan queue:work (3)
+```
 
 ```bash
 Get-ChildItem storage\logs -Recurse -Filter "*.log" | ForEach-Object {
