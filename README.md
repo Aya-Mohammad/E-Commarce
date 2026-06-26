@@ -220,3 +220,70 @@ php artisan queue:work --queue=default,reports
 | Stress Test        | `Tests/Order/Stress.js`                | Evaluates system stability under heavy traffic.                                                                  |
 | Combined Workload  | `Tests/Combined/Combined_100_Users.js` | Simulates a realistic workload with 100 concurrent users performing browsing, shopping, and checkout operations. |
 
+## Logging and Test Results
+
+To support performance analysis and validate the implementation of the non-functional requirements, every test execution automatically generates both structured application logs and k6 performance reports.
+
+### Business Logs
+
+Business logs record the functional behavior of the system during execution, including events such as authentication requests, product access, cart operations, stock updates, and order processing. These logs help verify the correctness of the application under concurrent workloads.
+
+```text
+storage/logs/
+├── order/
+├── auth/
+├── search/
+└── combined/
+```
+
+### AOP Performance Logs
+
+The application uses an AOP-based performance monitoring middleware that captures performance metrics for every HTTP request.
+
+Each log entry includes:
+
+- HTTP method
+- Request URL
+- Response status code
+- Execution time (`duration_ms`)
+- Memory usage (`memory_kb`)
+- Number of database queries (`query_count`)
+- Timestamp
+
+Example:
+
+```json
+{
+  "method": "POST",
+  "url": "/api/orders/place",
+  "duration_ms": 110.43,
+  "memory_kb": 3715.36,
+  "query_count": 10,
+  "status_code": 201,
+  "timestamp": "2026-06-19 18:20:23"
+}
+```
+
+### k6 Performance Reports
+
+Each k6 test script automatically exports a JSON summary using the `handleSummary()` function. Separate reports are generated for both the **Before Optimization** and **After Optimization** executions.
+
+```text
+nginx/Results/
+├── Order/
+├── Auth/
+├── Search/
+└── Combined/
+```
+
+The generated reports include:
+
+- Response time statistics
+- Throughput
+- Failure rate
+- Number of requests
+- Number of virtual users
+- Test duration
+- Custom performance metrics
+
+Together, the structured logs and k6 reports provide complete evidence for analyzing system behavior, comparing performance before and after optimization, and validating the implementation of all required non-functional requirements.
