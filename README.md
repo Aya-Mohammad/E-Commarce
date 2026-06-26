@@ -145,7 +145,7 @@ A custom AOP middleware records request duration, memory usage, executed databas
 | #1  | Race Condition         | `OrderService::placeOrderOptimized()` — DB lockForUpdate          |
 | #2  | Resource Management    | RateLimiter, cart limits, input validation, pagination            |
 | #3  | Async Processing       | SendOrderConfirmationJob, GenerateInvoiceJob, ProcessUserImage     |
-| #4  | Batch Processing       | `php artisan reports:generate` — chunk-based processing           |
+| #4  | Batch Processing       | `GenerateDailySalesReportJob::dispatch('2026-06-14')->onQueue('reports');` — chunk-based processing           |
 | #5  | Load Distribution      | Nginx Least Connections across 3 Laravel instances                |
 | #6  | Distributed Caching    | Redis Cache — products, cart, orders, search, stores              |
 | #7  | Distributed Locking    | `Cache::lock()` Redis mutex + MySQL `lockForUpdate()`             |
