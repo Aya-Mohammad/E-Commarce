@@ -287,3 +287,101 @@ The generated reports include:
 - Custom performance metrics
 
 Together, the structured logs and k6 reports provide complete evidence for analyzing system behavior, comparing performance before and after optimization, and validating the implementation of all required non-functional requirements.
+
+---
+
+# Prerequisites
+
+Before running the project, ensure the following are installed:
+
+* PHP 8.2+
+* Composer
+* MySQL 8.0+
+* Redis 7+
+* Nginx
+* k6 (for performance testing)
+* Node.js (optional, for k6 script management)
+
+---
+
+# Installation
+
+### 1. Clone the repository
+
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
+
+### 2. Install dependencies
+
+composer install
+
+### 3. Configure environment
+
+cp .env.example .env
+php artisan key:generate
+
+### 4. Configure your .env file
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=ecommerce
+DB_USERNAME=root
+DB_PASSWORD=
+
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+
+CACHE_STORE=redis
+QUEUE_CONNECTION=redis
+SESSION_DRIVER=redis
+
+STRICT_NFR_MODE=true
+
+### 5. Run migrations and seeders
+
+php artisan migrate --seed
+
+### 6. Generate JWT secret
+
+php artisan jwt:secret
+
+---
+
+# API Endpoints
+
+| Method | Endpoint                    | Description                          | Auth     |
+| ------ | --------------------------- | ------------------------------------ | -------- |
+| POST   | /api/auth/register          | Register a new user                  | Public   |
+| POST   | /api/auth/login             | Login and receive JWT token          | Public   |
+| POST   | /api/auth/logout            | Logout and invalidate token          | Required |
+| GET    | /api/products               | List all products (cached)           | Required |
+| GET    | /api/products/{id}          | Get product details (cached)         | Required |
+| GET    | /api/stores                 | List all stores (cached)             | Required |
+| GET    | /api/stores/{id}            | Get store details (cached)           | Required |
+| GET    | /api/stores/{id}/products   | Get store products (cached)          | Required |
+| GET    | /api/stores/filter          | Filter stores by criteria            | Required |
+| GET    | /api/search                 | Full-text search (cached)            | Required |
+| GET    | /api/cart                   | View cart (cached)                   | Required |
+| POST   | /api/cart                   | Add item to cart (locked)            | Required |
+| PUT    | /api/cart/{id}              | Update cart item quantity            | Required |
+| DELETE | /api/cart/{id}              | Remove item from cart                | Required |
+| POST   | /api/orders/place           | Place order (ACID + locked)          | Required |
+| GET    | /api/orders                 | Get user orders (cached)             | Required |
+
+---
+
+# NFR Implementation Reference
+
+| NFR | Requirement              | Implementation                                          |
+| --- | ------------------------ | ------------------------------------------------------- |
+| #1  | Race Condition           | `OrderService::placeOrderOptimized()` — DB lockForUpdate|
+| #2  | Resource Management      | RateLimiter, cart limits, input validation, pagination  |
+| #3  | Async Processing         | SendOrderConfirmationJob, GenerateInvoiceJob, ProcessUserImage |
+| #4  | Batch Processing         | `php artisan reports:generate` — chunk-based processing |
+| #5  | Load Distribution        | Nginx Least Connections across 3 Laravel instances      |
+| #6  | Distributed Caching      | Redis Cache — products, cart, orders, search, stores    |
+| #7  | Distributed Locking      | `Cache::lock()` Redis mutex + MySQL `lockForUpdate()`   |
+| #8  | Transaction Integrity    | `DB::transaction()` + `DB::afterCommit()` on checkout   |
+| #9  | Stress Testing           | k6 — 100 concurrent users, zero failures                |
+| #10 | Performance Monitoring   | AOP Middleware — duration, memory, query count per request |
