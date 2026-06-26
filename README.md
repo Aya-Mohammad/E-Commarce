@@ -129,6 +129,89 @@ The optimized system successfully supports one hundred concurrent users executin
 
 A custom AOP middleware records request duration, memory usage, executed database queries, response status, and request metadata, enabling bottleneck identification and quantitative performance comparison.
 
+---
+
+# API Endpoints
+
+| Method | Endpoint                    | Description                          | Auth     |
+| ------ | --------------------------- | ------------------------------------ | -------- |
+| POST   | /api/auth/register          | Register a new user                  | Public   |
+| POST   | /api/auth/login             | Login and receive JWT token          | Public   |
+| POST   | /api/auth/logout            | Logout and invalidate token          | Required |
+| GET    | /api/products               | List all products (cached)           | Required |
+| GET    | /api/products/{id}          | Get product details (cached)         | Required |
+| GET    | /api/stores                 | List all stores (cached)             | Required |
+| GET    | /api/stores/{id}            | Get store details (cached)           | Required |
+| GET    | /api/stores/{id}/products   | Get store products (cached)          | Required |
+| GET    | /api/stores/filter          | Filter stores by criteria            | Required |
+| GET    | /api/search                 | Full-text search (cached)            | Required |
+| GET    | /api/cart                   | View cart (cached)                   | Required |
+| POST   | /api/cart                   | Add item to cart (locked)            | Required |
+| PUT    | /api/cart/{id}              | Update cart item quantity            | Required |
+| DELETE | /api/cart/{id}              | Remove item from cart                | Required |
+| POST   | /api/orders/place           | Place order (ACID + locked)          | Required |
+| GET    | /api/orders                 | Get user orders (cached)             | Required |
+
+---
+
+# NFR Implementation Reference
+
+| NFR | Requirement              | Implementation                                          |
+| --- | ------------------------ | ------------------------------------------------------- |
+| #1  | Race Condition           | `OrderService::placeOrderOptimized()` — DB lockForUpdate|
+| #2  | Resource Management      | RateLimiter, cart limits, input validation, pagination  |
+| #3  | Async Processing         | SendOrderConfirmationJob, GenerateInvoiceJob, ProcessUserImage |
+| #4  | Batch Processing         | `php artisan reports:generate` — chunk-based processing |
+| #5  | Load Distribution        | Nginx Least Connections across 3 Laravel instances      |
+| #6  | Distributed Caching      | Redis Cache — products, cart, orders, search, stores    |
+| #7  | Distributed Locking      | `Cache::lock()` Redis mutex + MySQL `lockForUpdate()`   |
+| #8  | Transaction Integrity    | `DB::transaction()` + `DB::afterCommit()` on checkout   |
+| #9  | Stress Testing           | k6 — 100 concurrent users, zero failures                |
+| #10 | Performance Monitoring   | AOP Middleware — duration, memory, query count per request |
+
+---
+
+# Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
+```
+
+### 2. Install dependencies
+
+```bash
+composer install
+```
+
+### 3. Configure environment
+
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+### 4. Configure your .env file
+```bash
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=ecommerce
+DB_USERNAME=root
+DB_PASSWORD=
+```
+### 5. Run migrations and seeders
+```bash
+php artisan migrate --seed
+```
+### 6. Generate JWT secret
+```bash
+php artisan jwt:secret
+```
+---
+
 ## Running Performance Tests
 
 All performance experiments can be executed in two configurations:
@@ -302,93 +385,4 @@ Before running the project, ensure the following are installed:
 * k6 (for performance testing)
 * Node.js (optional, for k6 script management)
 
----
 
-# Installation
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/your-username/your-repo-name.git
-cd your-repo-name
-```
-
-### 2. Install dependencies
-
-```bash
-composer install
-```
-
-### 3. Configure environment
-
-```bash
-cp .env.example .env
-php artisan key:generate
-```
-
-### 4. Configure your .env file
-```bash
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=ecommerce
-DB_USERNAME=root
-DB_PASSWORD=
-```
-```bash
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-
-CACHE_STORE=redis
-QUEUE_CONNECTION=redis
-SESSION_DRIVER=redis
-
-STRICT_NFR_MODE=true
-```
-### 5. Run migrations and seeders
-```bash
-php artisan migrate --seed
-```
-### 6. Generate JWT secret
-```bash
-php artisan jwt:secret
-```
----
-
-# API Endpoints
-
-| Method | Endpoint                    | Description                          | Auth     |
-| ------ | --------------------------- | ------------------------------------ | -------- |
-| POST   | /api/auth/register          | Register a new user                  | Public   |
-| POST   | /api/auth/login             | Login and receive JWT token          | Public   |
-| POST   | /api/auth/logout            | Logout and invalidate token          | Required |
-| GET    | /api/products               | List all products (cached)           | Required |
-| GET    | /api/products/{id}          | Get product details (cached)         | Required |
-| GET    | /api/stores                 | List all stores (cached)             | Required |
-| GET    | /api/stores/{id}            | Get store details (cached)           | Required |
-| GET    | /api/stores/{id}/products   | Get store products (cached)          | Required |
-| GET    | /api/stores/filter          | Filter stores by criteria            | Required |
-| GET    | /api/search                 | Full-text search (cached)            | Required |
-| GET    | /api/cart                   | View cart (cached)                   | Required |
-| POST   | /api/cart                   | Add item to cart (locked)            | Required |
-| PUT    | /api/cart/{id}              | Update cart item quantity            | Required |
-| DELETE | /api/cart/{id}              | Remove item from cart                | Required |
-| POST   | /api/orders/place           | Place order (ACID + locked)          | Required |
-| GET    | /api/orders                 | Get user orders (cached)             | Required |
-
----
-
-# NFR Implementation Reference
-
-| NFR | Requirement              | Implementation                                          |
-| --- | ------------------------ | ------------------------------------------------------- |
-| #1  | Race Condition           | `OrderService::placeOrderOptimized()` — DB lockForUpdate|
-| #2  | Resource Management      | RateLimiter, cart limits, input validation, pagination  |
-| #3  | Async Processing         | SendOrderConfirmationJob, GenerateInvoiceJob, ProcessUserImage |
-| #4  | Batch Processing         | `php artisan reports:generate` — chunk-based processing |
-| #5  | Load Distribution        | Nginx Least Connections across 3 Laravel instances      |
-| #6  | Distributed Caching      | Redis Cache — products, cart, orders, search, stores    |
-| #7  | Distributed Locking      | `Cache::lock()` Redis mutex + MySQL `lockForUpdate()`   |
-| #8  | Transaction Integrity    | `DB::transaction()` + `DB::afterCommit()` on checkout   |
-| #9  | Stress Testing           | k6 — 100 concurrent users, zero failures                |
-| #10 | Performance Monitoring   | AOP Middleware — duration, memory, query count per request |
