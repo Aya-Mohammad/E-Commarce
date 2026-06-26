@@ -199,34 +199,7 @@ composer install
 cp .env.example .env
 php artisan key:generate
 ```
-
-### 4. Configure your .env file
-
-```env
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=ecommerce
-DB_USERNAME=root
-DB_PASSWORD=
-
-REDIS_HOST=127.0.0.1
-REDIS_PORT=6379
-
-CACHE_STORE=redis
-QUEUE_CONNECTION=redis
-SESSION_DRIVER=redis
-
-STRICT_NFR_MODE=true
-```
-
-### 5. Run migrations and seeders
-
-```bash
-php artisan migrate --seed
-```
-
-### 6. Generate JWT secret
+### 4. Generate JWT secret
 
 ```bash
 php artisan jwt:secret
@@ -295,23 +268,14 @@ k6 run -e STRICT_NFR_MODE=true <test-script>
 
 ## Test Execution Guide
 
-# PLACE ORDER - TEST SCENARIOS
-
----
-
 ## 1. Race Condition Test 
 
 ```bash
 php artisan mi:fresh --seed
 php artisan test:generate-tokens
-
-### Reset Logs
-
-Before running a new test, clear the previous logs:
-php artisan tinker;
+php artisan tinker
 
 DB::table('carts')->truncate();
-
 $rows = [];
 for ($userId = 1; $userId <= 80; $userId++) {
     $rows[] = [
@@ -326,18 +290,22 @@ for ($userId = 1; $userId <= 80; $userId++) {
 DB::table('carts')->insert($rows);
 
 DB::table('orders')->count();
+
+php artisan serve --port=8001
+php artisan serve --port=8002
+php artisan serve --port=8003
+
+after optimization:
+php artisan queue:work (3)
 ```
 ## 2. Place Order Stress Test
 ```bash
 php artisan mi:fresh --seed
 php artisan test:generate-tokens
+php artisan tinker
 
 DB::table('carts')->truncate();
-
-DB::table('products')
-    ->where('id', 1)
-    ->update(['quantity' => 500]);
-
+DB::table('products')->where('id', 1)->update(['quantity' => 500]);
 $rows = [];
 for ($userId = 1; $userId <= 150; $userId++) {
     $rows[] = [
@@ -348,30 +316,36 @@ for ($userId = 1; $userId <= 150; $userId++) {
         'updated_at' => now(),
     ];
 }
-
 DB::table('carts')->insert($rows);
 
 set PHP_CLI_SERVER_WORKERS=10
 php artisan serve --port=8001
-
 set PHP_CLI_SERVER_WORKERS=10
 php artisan serve --port=8002
-
 set PHP_CLI_SERVER_WORKERS=10
 php artisan serve --port=8003
+
+after optimization:
+php artisan queue:work (3)
 ```
 
 ## 3.Search & Login Stress Test
 ```bash
 php artisan mi:fresh --seed
+
+php artisan serve --port=8001
+php artisan serve --port=8002
+php artisan serve --port=8003
+
+after optimization:
+php artisan queue:work (3)
 ```
 
 ## 4.Chunck Test
 ```bash
-php artisan tinker;
+php artisan tinker
 
 $orders = [];
-
 for ($i = 1; $i <= 1500; $i++) {
     $orders[] = [
         'user_id' => rand(1, 150),
@@ -383,34 +357,28 @@ for ($i = 1; $i <= 1500; $i++) {
 }
 
 \App\Models\Order::insert($orders);
-
 \App\Models\Order::count();
 ```
 
 ## 5.System Stress Test
 ```bash
 php artisan mi:fresh --seed
-php artisan tinker;
+php artisan tinker
 
 Schema::disableForeignKeyConstraints();
-
 DB::table('order_items')->truncate();
 DB::table('orders')->truncate();
 DB::table('carts')->truncate();
-
-App\Models\Product::where('id', 1)->update([
-    'quantity' => 10
-]);
+App\Models\Product::where('id', 1)->update(['quantity' => 10]);
 
 set PHP_CLI_SERVER_WORKERS=10
 php artisan serve --port=8001
-
 set PHP_CLI_SERVER_WORKERS=10
 php artisan serve --port=8002
-
 set PHP_CLI_SERVER_WORKERS=10
 php artisan serve --port=8003
 
+after optimization:
 php artisan queue:work (3)
 ```
 
