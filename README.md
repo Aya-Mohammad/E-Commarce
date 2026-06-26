@@ -239,10 +239,10 @@ php artisan jwt:secret
 | GET    | /api/stores/{id}/products | Get store products (cached) | Required |
 | GET    | /api/stores/filter        | Filter stores by criteria   | Required |
 | GET    | /api/search               | Full-text search (cached)   | Required |
-| GET    | /api/cart                 | View cart (cached)          | Required |
-| POST   | /api/cart                 | Add item to cart (locked)   | Required |
-| PUT    | /api/cart/{id}            | Update cart item quantity   | Required |
-| DELETE | /api/cart/{id}            | Remove item from cart       | Required |
+| GET    | /api/cart/view            | View cart (cached)          | Required |
+| POST   | /api/cart/add             | Add item to cart (locked)   | Required |
+| POST   | /api/cart/update-quantity/{id} | Update cart item quantity   | Required |
+| DELETE | /api/cart/remove/{id}     | Remove item from cart       | Required |
 | POST   | /api/orders/place         | Place order (ACID + locked) | Required |
 | GET    | /api/orders               | Get user orders (cached)    | Required |
 
