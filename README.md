@@ -291,36 +291,7 @@ Run any test using:
 ```bash
 k6 run -e STRICT_NFR_MODE=true <test-script>
 ```
-
-### Starting the Full Environment
-
-Start the three Laravel application instances:
-
-```bash
-# Terminal 1
-set PHP_CLI_SERVER_WORKERS=10
-php artisan serve --port=8001
-
-# Terminal 2
-set PHP_CLI_SERVER_WORKERS=10
-php artisan serve --port=8002
-
-# Terminal 3
-set PHP_CLI_SERVER_WORKERS=10
-php artisan serve --port=8003
-```
-
-Start Nginx:
-
-```bash
-start nginx
-```
-
-Start the queue workers (optimized mode only):
-
-```bash
-php artisan queue:work --queue=default,reports
-```
+---
 
 ### Available Test Scripts
 
@@ -333,6 +304,45 @@ php artisan queue:work --queue=default,reports
 | Stress Test        | `Tests/Order/Stress.js`                 | Evaluates system stability under heavy traffic.                                                                  |
 | Combined Workload  | `Tests/Combined/Combined_100_Users.js`  | Simulates a realistic workload with 100 concurrent users performing browsing, shopping, and checkout operations. |
 
+---
+---
+
+## Test Execution Guide
+
+| Test                            | Preparation                                                                                                                                   | Infrastructure                                                                                               | Run Script                                                                                                                          | Verification                                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Race Condition**              | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Seed carts for 80 users using Tinker.                             | Start **3 Laravel instances** (ports 8001–8003) with `PHP_CLI_SERVER_WORKERS=10` each, then start **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Order_Race_Condition.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Order_Race_Condition.js`   | Verify stock never becomes negative and compare the generated logs and k6 results.                      |
+| **Order Stress**                | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Set product quantity to **500** and seed carts for **150 users**. | Start **3 Laravel instances** and **Nginx**.                                                                 | `k6 run -e STRICT_NFR_MODE=false Order/Stress.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Stress.js`                               | Compare throughput, latency, and failure rate before and after optimization.                            |
+| **Duplicate Checkout**          | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`                                                                      | Start **3 Laravel instances** and **Nginx**.                                                                 | `k6 run -e STRICT_NFR_MODE=false Order/Duplicate_Checkout.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Duplicate_Checkout.js`       | Verify that duplicate orders are prevented by the distributed lock.                                     |
+| **Search Performance**          | `php artisan migrate:fresh --seed`                                                                                                            | Start Laravel instances and Nginx.                                                                           | `k6 run -e STRICT_NFR_MODE=false Search/Search.js`<br>`k6 run -e STRICT_NFR_MODE=true Search/Search.js`                             | Compare cache hit ratio, response time, and database query count.                                       |
+| **Authentication (Async Jobs)** | `php artisan migrate:fresh --seed`                                                                                                            | Start Laravel instances, Nginx, and **Queue Workers** (after optimization).                                  | `k6 run -e STRICT_NFR_MODE=false Auth/Login.js`<br>`k6 run -e STRICT_NFR_MODE=true Auth/Login.js`                                   | Compare login response time before and after asynchronous job processing.                               |
+| **Combined 100 Users**          | `php artisan migrate:fresh --seed`<br>Clear orders, carts, and order_items, then reset product stock using Tinker.                            | Start **3 Laravel instances**, **Nginx**, and **3 Queue Workers**.                                           | `k6 run -e STRICT_NFR_MODE=false Combined/Combined_100_Users.js`<br>`k6 run -e STRICT_NFR_MODE=true Combined/Combined_100_Users.js` | Verify **100% checks passed** and **0% failed requests** after optimization.                            |
+| **Batch Processing**            | Insert **1500 approved orders** using Tinker.                                                                                                 | Start the **reports queue worker**.                                                                          | `php artisan queue:work --queue=reports --tries=1`                                                                                  | Monitor `storage/logs/laravel.log` and verify the generated `DailySalesReport` record after completion. |
+
+### Common Infrastructure
+
+The following services must be running before executing any load test:
+
+* Three Laravel instances (`8001`, `8002`, `8003`)
+* `PHP_CLI_SERVER_WORKERS=10` for each instance
+* Nginx configured as the load balancer
+* Queue Workers (required for tests involving asynchronous jobs and the combined system test)
+* Redis and MySQL services
+* Valid JWT tokens generated using:
+
+```bash
+php artisan test:generate-tokens
+```
+
+### Reset Logs
+
+Before running a new test, clear the previous logs:
+
+```bash
+Get-ChildItem storage\logs -Recurse -Filter "*.log" | ForEach-Object {
+    Clear-Content $_.FullName
+}
+```
 ---
 
 # Logging and Test Results
