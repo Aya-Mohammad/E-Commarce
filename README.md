@@ -155,17 +155,26 @@ A custom AOP middleware records request duration, memory usage, executed databas
 
 ---
 
-# Prerequisites
+# API Endpoints
 
-Before running the project, ensure the following are installed:
-
-* PHP 8.2+
-* Composer
-* MySQL 8.0+
-* Redis 7+
-* Nginx
-* k6 (for performance testing)
-* Node.js (optional, for k6 script management)
+| Method | Endpoint                  | Description                 | Auth     |
+| ------ | ------------------------- | --------------------------- | -------- |
+| POST   | /api/auth/register        | Register a new user         | Public   |
+| POST   | /api/auth/login           | Login and receive JWT token | Public   |
+| POST   | /api/auth/logout          | Logout and invalidate token | Required |
+| GET    | /api/products             | List all products (cached)  | Required |
+| GET    | /api/products/{id}        | Get product details (cached)| Required |
+| GET    | /api/stores               | List all stores (cached)    | Required |
+| GET    | /api/stores/{id}          | Get store details (cached)  | Required |
+| GET    | /api/stores/{id}/products | Get store products (cached) | Required |
+| GET    | /api/stores/filter        | Filter stores by criteria   | Required |
+| GET    | /api/search               | Full-text search (cached)   | Required |
+| GET    | /api/cart/view            | View cart (cached)          | Required |
+| POST   | /api/cart/add             | Add item to cart (locked)   | Required |
+| POST   | /api/cart/update-quantity/{id} | Update cart item quantity   | Required |
+| DELETE | /api/cart/remove/{id}     | Remove item from cart       | Required |
+| POST   | /api/orders/place         | Place order (ACID + locked) | Required |
+| GET    | /api/orders               | Get user orders (cached)    | Required |
 
 ---
 
@@ -222,29 +231,6 @@ php artisan migrate --seed
 ```bash
 php artisan jwt:secret
 ```
-
----
-
-# API Endpoints
-
-| Method | Endpoint                  | Description                 | Auth     |
-| ------ | ------------------------- | --------------------------- | -------- |
-| POST   | /api/auth/register        | Register a new user         | Public   |
-| POST   | /api/auth/login           | Login and receive JWT token | Public   |
-| POST   | /api/auth/logout          | Logout and invalidate token | Required |
-| GET    | /api/products             | List all products (cached)  | Required |
-| GET    | /api/products/{id}        | Get product details (cached)| Required |
-| GET    | /api/stores               | List all stores (cached)    | Required |
-| GET    | /api/stores/{id}          | Get store details (cached)  | Required |
-| GET    | /api/stores/{id}/products | Get store products (cached) | Required |
-| GET    | /api/stores/filter        | Filter stores by criteria   | Required |
-| GET    | /api/search               | Full-text search (cached)   | Required |
-| GET    | /api/cart/view            | View cart (cached)          | Required |
-| POST   | /api/cart/add             | Add item to cart (locked)   | Required |
-| POST   | /api/cart/update-quantity/{id} | Update cart item quantity   | Required |
-| DELETE | /api/cart/remove/{id}     | Remove item from cart       | Required |
-| POST   | /api/orders/place         | Place order (ACID + locked) | Required |
-| GET    | /api/orders               | Get user orders (cached)    | Required |
 
 ---
 
@@ -309,15 +295,15 @@ k6 run -e STRICT_NFR_MODE=true <test-script>
 
 ## Test Execution Guide
 
-| Test                            | Preparation                                                                                                                                   | Infrastructure                                                                                               | Run Script                                                                                                                          | Verification                                                                                            |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Race Condition**              | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Seed carts for 80 users using Tinker.                             | Start **3 Laravel instances** (ports 8001–8003) with `PHP_CLI_SERVER_WORKERS=10` each, then start **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Order_Race_Condition.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Order_Race_Condition.js`   | Verify stock never becomes negative and compare the generated logs and k6 results.                      |
-| **Order Stress**                | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Set product quantity to **500** and seed carts for **150 users**. | Start **3 Laravel instances** and **Nginx**.                                                                 | `k6 run -e STRICT_NFR_MODE=false Order/Stress.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Stress.js`                               | Compare throughput, latency, and failure rate before and after optimization.                            |
-| **Duplicate Checkout**          | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`                                                                      | Start **3 Laravel instances** and **Nginx**.                                                                 | `k6 run -e STRICT_NFR_MODE=false Order/Duplicate_Checkout.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Duplicate_Checkout.js`       | Verify that duplicate orders are prevented by the distributed lock.                                     |
-| **Search Performance**          | `php artisan migrate:fresh --seed`                                                                                                            | Start Laravel instances and Nginx.                                                                           | `k6 run -e STRICT_NFR_MODE=false Search/Search.js`<br>`k6 run -e STRICT_NFR_MODE=true Search/Search.js`                             | Compare cache hit ratio, response time, and database query count.                                       |
-| **Authentication (Async Jobs)** | `php artisan migrate:fresh --seed`                                                                                                            | Start Laravel instances, Nginx, and **Queue Workers** (after optimization).                                  | `k6 run -e STRICT_NFR_MODE=false Auth/Login.js`<br>`k6 run -e STRICT_NFR_MODE=true Auth/Login.js`                                   | Compare login response time before and after asynchronous job processing.                               |
-| **Combined 100 Users**          | `php artisan migrate:fresh --seed`<br>Clear orders, carts, and order_items, then reset product stock using Tinker.                            | Start **3 Laravel instances**, **Nginx**, and **3 Queue Workers**.                                           | `k6 run -e STRICT_NFR_MODE=false Combined/Combined_100_Users.js`<br>`k6 run -e STRICT_NFR_MODE=true Combined/Combined_100_Users.js` | Verify **100% checks passed** and **0% failed requests** after optimization.                            |
-| **Batch Processing**            | Insert **1500 approved orders** using Tinker.                                                                                                 | Start the **reports queue worker**.                                                                          | `php artisan queue:work --queue=reports --tries=1`                                                                                  | Monitor `storage/logs/laravel.log` and verify the generated `DailySalesReport` record after completion. |
+| Test | Preparation | Infrastructure | Run Script |
+|------|-------------|----------------|------------|
+| **Race Condition** | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Seed carts for 80 users using Tinker. | Start **3 Laravel instances** (ports 8001–8003) with `PHP_CLI_SERVER_WORKERS=10` each, then start **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Order_Race_Condition.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Order_Race_Condition.js` |
+| **Order Stress** | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens`<br>Set product quantity to **500** and seed carts for **150 users**. | Start **3 Laravel instances** and **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Stress.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Stress.js` |
+| **Duplicate Checkout** | `php artisan migrate:fresh --seed`<br>`php artisan test:generate-tokens` | Start **3 Laravel instances** and **Nginx**. | `k6 run -e STRICT_NFR_MODE=false Order/Duplicate_Checkout.js`<br>`k6 run -e STRICT_NFR_MODE=true Order/Duplicate_Checkout.js` |
+| **Search Performance** | `php artisan migrate:fresh --seed` | Start Laravel instances and Nginx. | `k6 run -e STRICT_NFR_MODE=false Search/Search.js`<br>`k6 run -e STRICT_NFR_MODE=true Search/Search.js` |
+| **Authentication (Async Jobs)** | `php artisan migrate:fresh --seed` | Start Laravel instances, Nginx, and Queue Workers (after optimization). | `k6 run -e STRICT_NFR_MODE=false Auth/Login.js`<br>`k6 run -e STRICT_NFR_MODE=true Auth/Login.js` |
+| **Combined 100 Users** | `php artisan migrate:fresh --seed`<br>Clear orders, carts, and order_items, then reset product stock using Tinker. | Start **3 Laravel instances**, **Nginx**, and **3 Queue Workers**. | `k6 run -e STRICT_NFR_MODE=false Combined/Combined_100_Users.js`<br>`k6 run -e STRICT_NFR_MODE=true Combined/Combined_100_Users.js` |
+| **Batch Processing** | Insert **1500 approved orders** using Tinker. | Start the **reports queue worker**. | `php artisan queue:work --queue=reports --tries=1` |
 
 ### Common Infrastructure
 
