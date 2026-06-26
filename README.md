@@ -308,27 +308,34 @@ Before running the project, ensure the following are installed:
 
 ### 1. Clone the repository
 
+```bash
 git clone https://github.com/your-username/your-repo-name.git
 cd your-repo-name
+```
 
 ### 2. Install dependencies
 
+```bash
 composer install
+```
 
 ### 3. Configure environment
 
+```bash
 cp .env.example .env
 php artisan key:generate
+```
 
 ### 4. Configure your .env file
-
+```bash
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE=ecommerce
 DB_USERNAME=root
 DB_PASSWORD=
-
+```
+```bash
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 
@@ -337,15 +344,15 @@ QUEUE_CONNECTION=redis
 SESSION_DRIVER=redis
 
 STRICT_NFR_MODE=true
-
+```
 ### 5. Run migrations and seeders
-
+```bash
 php artisan migrate --seed
-
+```
 ### 6. Generate JWT secret
-
+```bash
 php artisan jwt:secret
-
+```
 ---
 
 # API Endpoints
