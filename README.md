@@ -8,27 +8,6 @@ The application is deployed as three Laravel instances behind an Nginx load bala
 
 ---
 
-# Table of Contents
-
-* [Project Overview](#project-overview)
-* [Technology Stack](#technology-stack)
-* [System Architecture](#system-architecture)
-* [Core Features](#core-features)
-* [Performance Requirements](#performance-requirements)
-* [Prerequisites](#prerequisites)
-* [Environment Configuration](#environment-configuration)
-* [Installation](#installation)
-* [Database Seeding](#database-seeding)
-* [Running the Application](#running-the-application)
-* [Load Testing](#load-testing)
-* [Test Scripts](#test-scripts)
-* [Logs and Results](#logs-and-results)
-* [API Endpoints](#api-endpoints)
-* [Troubleshooting](#troubleshooting)
-* [Evidence Checklist](#evidence-checklist)
-
----
-
 # Project Overview
 
 This project implements a scalable e-commerce backend capable of supporting concurrent users while preserving data integrity and maintaining low response times under heavy workloads.
